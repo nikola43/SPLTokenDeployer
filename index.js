@@ -2,15 +2,12 @@ const util = require('util');
 const exec = util.promisify(require('child_process').exec);
 const fs = require('fs');
 const { NFTStorage, File } = require('nft.storage')
-// The 'path' module provides helpers for manipulating filesystem paths
 const path = require('path')
-
-// The 'mime' npm package helps us set the correct file type on our File objects
 const mime = require('mime')
+const dotenv = require('dotenv');
 const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
 
-
-
+dotenv.config();
 async function main() {
 
     const receiver = "6eVy93roE7VtyXv4iuqbCyseAQ979A5SqjiVwsyMSfyV"
@@ -20,23 +17,48 @@ async function main() {
     const symbol = "img"
     const description = "img"
     const image = "./logo.png"
-    await uploadMetadata(image, name, symbol, description)
-
+    const supply = 100000000;
 
     // Deploy token
+    const { deploySignature, disableMintSignature, tranferToOwnerSignature, tokenAddress } = await deploySPLToken(image, name, symbol, description, supply, receiver)
+    console.log({
+        deploySignature,
+        disableMintSignature,
+        tranferToOwnerSignature,
+        tokenAddress
+    });
+
+    fs.writeFileSync(`data/${tokenAddress}.json`, JSON.stringify({
+        deploySignature,
+        disableMintSignature,
+        tranferToOwnerSignature,
+        tokenAddress
+    }));
+}
+
+async function deploySPLToken(image, name, symbol, description, supply, receiver) {
+    console.log("Uploading metadata...");
+    await uploadMetadata(image, name, symbol, description)
+
     console.log("Deploying...");
-    const supply = 100000000;
-    const { deploySignature, tokenAddress } = await deploySPLToken(supply)
-    console.log("deploySignature: ", deploySignature);
-    console.log("tokenAddress: ", tokenAddress);
+    const { deploySignature, tokenAddress } = await _deploySPLToken(supply)
+    //console.log("deploySignature: ", deploySignature);
+    //console.log("tokenAddress: ", tokenAddress);
 
     console.log("Disabling minting...");
     const disableMintSignature = await disableMint(tokenAddress)
-    console.log("disableMintSignature: ", disableMintSignature);
+    //console.log("disableMintSignature: ", disableMintSignature);
 
     console.log("Transfering to Owner...");
     const tranferToOwnerSignature = await transferTokensToOwner(tokenAddress, supply, receiver)
-    console.log("tranferToOwnerSignature: ", tranferToOwnerSignature);
+    //console.log("tranferToOwnerSignature: ", tranferToOwnerSignature);
+
+    return {
+        deploySignature,
+        disableMintSignature,
+        tranferToOwnerSignature,
+        tokenAddress
+    }
 }
 
 async function fileFromPath(filePath) {
@@ -62,13 +84,13 @@ async function uploadMetadata(file, name, symbol, description) {
         headers: {
             'accept': 'application/json',
             'Content-Type': 'application/json',
-            'Authorization': 'Bearer WyIweGYzY2IyOWI5NGZiYmZlYTQyNmM1MWNlNGNlM2RmMWUzZDQ1YTE2ZWUzNmI1YTIxYTliY2U5MWQ5NGZkYTU0MzIzMDk0Njk0MWE3N2JiNTQwODg3ZWMwYjFhZGNmYWNkMDZlMGQwZWM2ZDE0OTU4OTdhMTk1MTkzY2E3NWUwOWE0MWMiLCJ7XCJpYXRcIjoxNzAxMTQ5NzQ0LFwiZXh0XCI6MTcwMTE1Njk0NCxcImlzc1wiOlwiZGlkOmV0aHI6MHhiZUJjMEIxMDQ5NGFiQkRlMmE1QzczZjA3NDA4MjkzQjM1Nzk5NjRBXCIsXCJzdWJcIjpcIkVER3Faa1Fpc2JsVUxVbUY4S2psYWlyZExfYWotMFVwb3VWbnhxZGlTbzA9XCIsXCJhdWRcIjpcIlpvYmw1QzJHRWVvT1dudXdpb0RURDRBSnd1NlhFTW5WSEttWjZWOFZZLUU9XCIsXCJuYmZcIjoxNzAxMTQ5NzQ0LFwidGlkXCI6XCIyNTM2MTU2Ny1lYzRmLTQ4MzUtYWE0Yi0zYmE0MTRkMzQ2MTBcIixcImFkZFwiOlwiMHhjYTJkYTNjNDU4NTZiZjA0N2M0Y2ZhZjhmNzk3YjAzNGZlNDBlMzhmMDBmNzE4YjlkM2Q2NDkxMDhkNzQxOWQ3Mjg1OGE5ZWRlMmU2YjQ1OTFlZmU1NzFlODgxZGVhODk2NDFjNjE4OGY4MGJlNGMyODZiNDA4NzFjZDk4OTVjNDFiXCJ9Il0='
+            'Authorization': 'Bearer ' + process.env.NFT_STORAGE_API_KEY
         },
         body: fs.readFileSync("./metadata.json")
     });
 
     const data = await r.json();
-    console.log("data: ", data);
+    //console.log("data: ", data);
     metadata["uri"] = `https://${data.value.cid}.ipfs.nftstorage.link`;
 
     fs.unlinkSync("./metadata.json");
@@ -87,7 +109,7 @@ async function uploadImageLogo(imagePath) {
         image
     }
 
-    const client = new NFTStorage({ token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJkaWQ6ZXRocjoweGJlQmMwQjEwNDk0YWJCRGUyYTVDNzNmMDc0MDgyOTNCMzU3OTk2NEEiLCJpc3MiOiJuZnQtc3RvcmFnZSIsImlhdCI6MTcwMTEzNjgwNjU2MCwibmFtZSI6InNvbGRlcGxveWVyIn0.-K9vkqe7B_oxuAbAS-rtrAAu3Xn16QTHUBFxpC9xe9c" })
+    const client = new NFTStorage({ token: process.env.NFT_STORAGE_API_KEY })
     const metadataInfo = await client.store(metadata)
 
     const uri = `https://${metadataInfo.url.split("//")[1].split("/")[0]}.ipfs.nftstorage.link/metadata.json`
@@ -97,7 +119,7 @@ async function uploadImageLogo(imagePath) {
     return `https://${data.image.split("//")[1].split("/")[0]}.ipfs.nftstorage.link/logo.png`;
 }
 
-async function deploySPLToken(supply) {
+async function _deploySPLToken(supply) {
     let command = `metaboss create fungible -d 9 -m metadata.json --initial-supply ${supply}`
     let deploySignature = ""
     let tokenAddress = ""
