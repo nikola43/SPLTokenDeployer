@@ -1,0 +1,17 @@
+
+1 solana config set --url https://api.devnet.solana.com
+2 solana config set --keypair Documents/my-keypair.json
+3 spl-token create-token --decimals 18
+4 spl-token create-account CqjmfbWVLefYBBs1qKgGL29P2VzhxrZ4jimKXtVno4ZB
+27ojExUGhfFDDZByBYTCLsUdBcbtKsnfqX1bVFP2jnox
+5 spl-token mint 6T3bPn7z66ZR7H51yZ8ZbaW2oxJoCYMwMGRd6s3TXTW8 1000000
+spl-token authorize D4J7b2EZQpQPqtNrToTbAZqHGtvtqfm2Gf7Bp3zAixeH mint --disable
+
+
+metaboss create fungible -d 9 -m metadata.json --initial-supply 100000000
+spl-token authorize D4J7b2EZQpQPqtNrToTbAZqHGtvtqfm2Gf7Bp3zAixeH mint --disable
+
+
+
+spl-token transfer H3Xsva3q1RuFJboTpVQFkQzEBvhTEGPsNoQ5tMnB5yLJ 100 6eVy93roE7VtyXv4iuqbCyseAQ979A5SqjiVwsyMSfyV --allow-unfunded-recipient --fund-recipient
+
