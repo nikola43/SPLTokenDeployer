@@ -21,9 +21,6 @@ async function main() {
     const description = "img"
     const image = "./logo.png"
     await uploadMetadata(image, name, symbol, description)
-    //await uploadLogo()
-    //return
-    // await uploadMetadata(image, name, symbol, description)
 
 
     // Deploy token
@@ -46,23 +43,6 @@ async function fileFromPath(filePath) {
     const content = await fs.promises.readFile(filePath)
     const type = mime.getType(filePath)
     return new File([content], path.basename(filePath), { type })
-}
-
-async function uploadLogo() {
-    const r = await fetch('https://api.nft.storage/upload', {
-        method: 'POST',
-        headers: {
-            'accept': 'application/json',
-            'Content-Type': 'image/*',
-            'Authorization': 'Bearer WyIweGYzY2IyOWI5NGZiYmZlYTQyNmM1MWNlNGNlM2RmMWUzZDQ1YTE2ZWUzNmI1YTIxYTliY2U5MWQ5NGZkYTU0MzIzMDk0Njk0MWE3N2JiNTQwODg3ZWMwYjFhZGNmYWNkMDZlMGQwZWM2ZDE0OTU4OTdhMTk1MTkzY2E3NWUwOWE0MWMiLCJ7XCJpYXRcIjoxNzAxMTQ5NzQ0LFwiZXh0XCI6MTcwMTE1Njk0NCxcImlzc1wiOlwiZGlkOmV0aHI6MHhiZUJjMEIxMDQ5NGFiQkRlMmE1QzczZjA3NDA4MjkzQjM1Nzk5NjRBXCIsXCJzdWJcIjpcIkVER3Faa1Fpc2JsVUxVbUY4S2psYWlyZExfYWotMFVwb3VWbnhxZGlTbzA9XCIsXCJhdWRcIjpcIlpvYmw1QzJHRWVvT1dudXdpb0RURDRBSnd1NlhFTW5WSEttWjZWOFZZLUU9XCIsXCJuYmZcIjoxNzAxMTQ5NzQ0LFwidGlkXCI6XCIyNTM2MTU2Ny1lYzRmLTQ4MzUtYWE0Yi0zYmE0MTRkMzQ2MTBcIixcImFkZFwiOlwiMHhjYTJkYTNjNDU4NTZiZjA0N2M0Y2ZhZjhmNzk3YjAzNGZlNDBlMzhmMDBmNzE4YjlkM2Q2NDkxMDhkNzQxOWQ3Mjg1OGE5ZWRlMmU2YjQ1OTFlZmU1NzFlODgxZGVhODk2NDFjNjE4OGY4MGJlNGMyODZiNDA4NzFjZDk4OTVjNDFiXCJ9Il0='
-        },
-        body: fs.readFileSync('logo.png')
-    });
-
-    const data = await r.json();
-    console.log("data: ", data);
-
-    return data.value.cid;
 }
 
 async function uploadMetadata(file, name, symbol, description) {
@@ -99,8 +79,6 @@ async function uploadMetadata(file, name, symbol, description) {
 
 
 async function uploadImageLogo(imagePath) {
-    //const image = await getExampleImage()
-    // create file from image path
     const image = await fileFromPath(imagePath)
     const metadata = {
         "name": "",
@@ -112,55 +90,12 @@ async function uploadImageLogo(imagePath) {
     const client = new NFTStorage({ token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJkaWQ6ZXRocjoweGJlQmMwQjEwNDk0YWJCRGUyYTVDNzNmMDc0MDgyOTNCMzU3OTk2NEEiLCJpc3MiOiJuZnQtc3RvcmFnZSIsImlhdCI6MTcwMTEzNjgwNjU2MCwibmFtZSI6InNvbGRlcGxveWVyIn0.-K9vkqe7B_oxuAbAS-rtrAAu3Xn16QTHUBFxpC9xe9c" })
     const metadataInfo = await client.store(metadata)
 
-    console.log('NFT data stored!')
-    //console.log('Metadata URI: ', metadataInfo.url)
     const uri = `https://${metadataInfo.url.split("//")[1].split("/")[0]}.ipfs.nftstorage.link/metadata.json`
-    console.log('Metadata URI: ', uri)
 
     const r = await fetch(uri);
     const data = await r.json();
-    console.log("data: ", data);
-
-
-    console.log("metadata: ", `https://${data.image.split("//")[1].split("/")[0]}.ipfs.nftstorage.link/logo.png`);
     return `https://${data.image.split("//")[1].split("/")[0]}.ipfs.nftstorage.link/logo.png`;
 }
-
-
-
-/*
-async function storeMetadata(name, symbol, description, imagePath) {
-    //const image = await getExampleImage()
-    // create file from image path
-    const image = await fileFromPath(imagePath)
-    const metadata = {
-        "name": name,
-        "symbol": symbol,
-        "description": description,
-        image
-    }
-
-    const client = new NFTStorage({ token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJkaWQ6ZXRocjoweGJlQmMwQjEwNDk0YWJCRGUyYTVDNzNmMDc0MDgyOTNCMzU3OTk2NEEiLCJpc3MiOiJuZnQtc3RvcmFnZSIsImlhdCI6MTcwMTEzNjgwNjU2MCwibmFtZSI6InNvbGRlcGxveWVyIn0.-K9vkqe7B_oxuAbAS-rtrAAu3Xn16QTHUBFxpC9xe9c" })
-    const metadataInfo = await client.store(metadata)
-
-    console.log('NFT data stored!')
-    //console.log('Metadata URI: ', metadataInfo.url)
-    const uri = `https://${metadataInfo.url.split("//")[1].split("/")[0]}.ipfs.nftstorage.link/metadata.json`
-    console.log('Metadata URI: ', uri)
-
-
-    const r = await fetch(uri);
-    const data = await r.json();
-    console.log("data: ", data);
-    metadata["image"] = `https://${data.image.split("//")[1].split("/")[0]}.ipfs.nftstorage.link/logo.png`;
-    metadata["uri"] = uri;
-    metadata["logoURI"] = metadata["image"];
-    fs.unlinkSync("./metadata.json");
-    fs.writeFileSync('metadata.json', JSON.stringify(metadata));
-
-    console.log("metadata: ", metadata);
-}
-*/
 
 async function deploySPLToken(supply) {
     let command = `metaboss create fungible -d 9 -m metadata.json --initial-supply ${supply}`
