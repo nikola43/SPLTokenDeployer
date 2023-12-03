@@ -1,3 +1,15 @@
+// Import necessary functions and constants from the Solana web3.js and SPL Token packages
+import {
+    sendAndConfirmTransaction,
+    Connection,
+    Keypair,
+    SystemProgram,
+    Transaction,
+    LAMPORTS_PER_SOL,
+    Cluster,
+    PublicKey,
+} from '@solana/web3.js';
+
 const { Telegraf } = require("telegraf")
 const { message } = require("telegraf/filters")
 
@@ -5,7 +17,7 @@ const fs = require("fs")
 const path = require("path")
 const util = require('util');
 const exec = util.promisify(require('child_process').exec);
-const solanaWeb3 = require('@solana/web3.js');
+const bs58 = require('bs58');
 
 // Import the NFTStorage class and File constructor from the 'nft.storage' package
 import { NFTStorage, File } from 'nft.storage'
@@ -42,6 +54,14 @@ type DeployedToken = {
 
 const SUPPORTED_CHAINS = [
     {
+        id: 999999999,
+        name: 'Sol Dev',
+        symbol: 'SOL',
+        rpc: 'https://api.devnet.solana.com',
+        testnet: false,
+        limit: 0.01,
+    },
+    {
         id: 9999999991,
         name: 'Sol main',
         symbol: 'SOL',
@@ -49,14 +69,6 @@ const SUPPORTED_CHAINS = [
         testnet: true,
         limit: 0.01,
     },
-    {
-        id: 999999999,
-        name: 'Sol',
-        symbol: 'SOL',
-        rpc: 'https://api.devnet.solana.com',
-        testnet: true,
-        limit: 0.01,
-    }
 ]
 
 const INPUT_CAPTIONS: any = {
@@ -64,24 +76,7 @@ const INPUT_CAPTIONS: any = {
     symbol: 'Please enter symbol for the token',
     name: 'Please enter name for the token',
     supply: 'Please enter total supply for the token. (Do not enter commas)',
-    buyTax: 'Please enter Buy percentage of token',
-    sellTax: 'Please enter Sell percentage of token',
-    burnPerTx: 'Please enter Burn percentage of token',
-    taxReceiver: 'Please enter address of Tax receiver',
-    preMint: 'Please enter amount of pre-minted to owner',
-    ethLP: `Please enter ETH amount to add Liquidity`,
-    maxPerWallet: 'Please enter Max percent of supply per Wallet',
-    maxPerTx: 'Please enter Max percent of supply per Tx',
-    lockTime: 'Please enter days for Custom duration to Lock',
-    bridgeAmount: 'Please enter amount to Bridge',
-    bridgeTo: 'Please enter the destination wallet address to Bridge',
-    mixerAmount: 'Please enter amount to Mixer',
-    mixerReceiverAddress: 'Please enter target receiver address',
-    reflectionTokenAddress: 'Please enter address of reflection token',
-    reflectionPercentage: 'Please enter reflection perentage',
-    website: 'Please enter website url',
-    telegram: 'Please enter telegram url',
-    x: 'Please enter X url'
+    taxes: 'Please enter tranfer taxes',
 }
 
 const { escape_markdown } = require("./common/utils")
@@ -123,7 +118,8 @@ bot.use(async (ctx: any, next: any) => {
 const states: any = {}
 
 const state = (ctx: any, values = {}) => {
-    if (!values) {
+    const valuesEmpty = Object.keys(values).length === 0;
+    if (valuesEmpty) {
         const defaultChain = SUPPORTED_CHAINS.find(chain => TESTNET_SHOW ? true : !chain.testnet)
         return {
             chainId: defaultChain?.id,
@@ -132,12 +128,12 @@ const state = (ctx: any, values = {}) => {
             trading: {},
             bridgeAmount: 1,
             mixerAmount: 0,
-            ...(
-                process.env.DEBUG_PVKEY ? {
-                    pvkey: process.env.DEBUG_PVKEY,
-                    account: ""
-                } : {}
-            ),
+            // ...(
+            //     process.env.DEBUG_PVKEY ? {
+            //         pvkey: process.env.DEBUG_PVKEY,
+            //         account: ""
+            //     } : {}
+            // ),
             ...states[ctx.chat.id]
         }
     }
@@ -207,7 +203,7 @@ const update = async (ctx: any, caption: string, buttons: Buttons[] = [], must =
 }
 
 const showWelcome = async (ctx: any) => {
-    const { chainId, pvkey } = state(ctx)
+    const { chainId, wallet } = state(ctx)
     state(ctx, { mixerStatus: false, mixerAmount: 0, mixerReceiverAddress: "" });
     return update(ctx, `Welcome to ${BOT_NAME}!`, [
         [
@@ -220,18 +216,16 @@ const showWelcome = async (ctx: any) => {
 }
 
 
+
 const showStart = async (ctx: any) => {
-    const { chainId, pvkey } = state(ctx)
-    if (pvkey)
+    const { chainId, wallet } = state(ctx)
+    if (wallet)
         return showWallet(ctx)
 
-    const supportedChains = [
-        { text: '⚪ Solana Main', callback_data: 'chain@9999999991#deploy' },
-        { text: '⚪ Solana Devnet', callback_data: 'chain@999999999#deploy' },
-    ]
-
     return update(ctx, `Setup your wallet to start using ${BOT_NAME}!`, [
-        supportedChains,
+        SUPPORTED_CHAINS.map(chain => ({
+            text: `${chain.id == chainId ? '🟢' : '⚪'} ${chain.name}`, callback_data: `chain@${chain.id}`
+        })),
         [
             {
                 text: `Connect Wallet`,
@@ -241,10 +235,11 @@ const showStart = async (ctx: any) => {
     ])
 }
 
+
 const showAccount = (ctx: any) => {
-    const { pvkey } = state(ctx)
+    const { wallet } = state(ctx)
     update(ctx, 'Setup your Account', [
-        pvkey ? [
+        wallet ? [
             {
                 text: `🔌 Disconnect`,
                 callback_data: `disconnect`,
@@ -270,20 +265,18 @@ const showAccount = (ctx: any) => {
 }
 
 const showWallet = async (ctx: any): Promise<any> => {
-    const { chainId, pvkey } = state(ctx)
-    if (!pvkey)
+    const { chainId, wallet } = state(ctx)
+    if (!wallet)
         return showStart(ctx)
 
     const chain = SUPPORTED_CHAINS.find(chain => chain.id == chainId)
+    const connection = await initSolanaWeb3Connection(chain.rpc)
+    const solBalance = await getSolBalance(connection, wallet.publicKey.toBase58());
 
-
-    const supportedChains = [
-        { text: '⚪ Solana Main', callback_data: 'chain@9999999991#deploy' },
-        { text: '⚪ Solana Devnet', callback_data: 'chain@999999999#deploy' },
-    ]
-
-    return update(ctx, ['🧳 Wallet', `🔑 Address: Ξ`].join('\n'), [
-        supportedChains,
+    return update(ctx, ['🧳 Wallet: ' + wallet.publicKey.toBase58() + " " + solBalance + " SOL"].join('\n'), [
+        SUPPORTED_CHAINS.map(chain => ({
+            text: `${chain.id == chainId ? '🟢' : '⚪'} ${chain.name}`, callback_data: `chain@${chain.id}`
+        })),
         [
             {
                 text: `📝 Deploy Token`,
@@ -315,7 +308,8 @@ const showWait = async (ctx: any, caption: string) => {
 
 const showPage = (ctx: any, page: any) => {
     if (page == 'start')
-        showStart(ctx)
+        showWallet(ctx)
+    //showWallet(ctx)
     else if (page == 'account')
         showAccount(ctx)
     else if (page == 'key')
@@ -355,18 +349,17 @@ const showSuccess = async (ctx: any, message: any, href: any, duration = 10000) 
 
 
 const showList = async (ctx: any) => {
-    const { chainId, pvkey } = state(ctx)
+    const { chainId, wallet } = state(ctx)
 
 
-    const supportedChains = [
-        { text: '⚪ Solana Main', callback_data: 'chain@9999999991#deploy' },
-        { text: '⚪ Solana Devnet', callback_data: 'chain@999999999#deploy' },
-    ]
+
 
     const deployed: DeployedToken[] = tokens(ctx)
 
     return update(ctx, [' '].join('\n'), [
-        supportedChains,
+        SUPPORTED_CHAINS.map(chain => ({
+            text: `${chain.id == chainId ? '🟢' : '⚪'} ${chain.name}`, callback_data: `chain@${chain.id}`
+        })),
         ...deployed.map(token =>
             [
                 {
@@ -385,34 +378,10 @@ const showList = async (ctx: any) => {
 }
 
 const showDeploy = async (ctx: any) => {
-    const { chainId, pvkey, token } = state(ctx)
-    if (!pvkey)
+    const { chainId, wallet, token } = state(ctx)
+    if (!wallet)
         return showStart(ctx)
     const chain = SUPPORTED_CHAINS.find(chain => chain.id == chainId)
-
-
-    const supportedTestnetChains1 = [
-        { text: '⚪ Goerli', callback_data: 'chain@5#deploy' },
-        { text: '⚪ Base Goerli', callback_data: 'chain@84531#deploy' },
-    ]
-    const supportedTestnetChains2 = [
-        { text: '⚪ Puppy Net', callback_data: 'chain@719#deploy' },
-        { text: '⚪ Solana Devnet', callback_data: 'chain@999999999#deploy' },
-    ]
-
-    const supportedChains1 = [
-        { text: '⚪ Ethereum', callback_data: 'chain@1#deploy' },
-        { text: '⚪ BNB Smart Chain', callback_data: 'chain@56#deploy' },
-    ]
-
-    const supportedChains2 = [
-        { text: '⚪ Arbitrum', callback_data: 'chain@42161#deploy' },
-        { text: '⚪ Base', callback_data: 'chain@8453#deploy' },
-    ]
-
-    const supportedChains3 = [
-        { text: '⚪ Shibarium', callback_data: 'chain@109#deploy' }
-    ]
 
     return update(ctx, [
         '🧳 Token Parameters',
@@ -420,13 +389,13 @@ const showDeploy = async (ctx: any) => {
         `${token.symbol ? '✅' : '❌'} Symbol: "${token.symbol?.toUpperCase() ?? 'Not set'}"`,
         `${token.name ? '✅' : '❌'} Name: "${token.name ?? 'Not set'}"`,
         `${token.supply ? '✅' : '❌'} Supply: "${token.supply ?? 'Not set'}"`,
+        `${token.taxes ? '✅' : '❔'} Logo: "${token.taxes ? `${token.taxes}%` : 'Not set'}"`,
         `${token.description ? '✅' : '❔'} Description: "${token.description ? `${token.description}%` : 'Not set'}"`,
+        `${token.logo ? '✅' : '❔'} Logo: "${token.logo ? `${token.logo}%` : 'Not set'}"`,
     ].join('\n'), [
-        supportedTestnetChains1,
-        supportedTestnetChains2,
-        supportedChains1,
-        supportedChains2,
-        supportedChains3,
+        SUPPORTED_CHAINS.map(chain => ({
+            text: `${chain.id == chainId ? '🟢' : '⚪'} ${chain.name}`, callback_data: `chain@${chain.id}`
+        })),
         [
             {
                 text: `💲 Symbol`,
@@ -443,7 +412,11 @@ const showDeploy = async (ctx: any) => {
         ],
         [
             {
-                text: `🔢 Description`,
+                text: `💲 Taxes`,
+                callback_data: `input@taxes`,
+            },
+            {
+                text: `🔠 Description`,
                 callback_data: `input@description`,
             },
             {
@@ -474,46 +447,26 @@ const showDeploy = async (ctx: any) => {
 }
 
 const showToken = async (ctx: any, address: any) => {
-    const { chainId, pvkey, token } = state(ctx)
+    const { chainId, wallet, token } = state(ctx)
 
-    const supportedTestnetChains1 = [
-        { text: '⚪ Goerli', callback_data: 'chain@5#deploy' },
-        { text: '⚪ Base Goerli', callback_data: 'chain@84531#deploy' },
-    ]
-    const supportedTestnetChains2 = [
-        { text: '⚪ Puppy Net', callback_data: 'chain@719#deploy' },
-        { text: '⚪ Solana Devnet', callback_data: 'chain@999999999#deploy' },
-    ]
 
-    const supportedChains1 = [
-        { text: '⚪ Ethereum', callback_data: 'chain@1#deploy' },
-        { text: '⚪ BNB Smart Chain', callback_data: 'chain@56#deploy' },
-    ]
-
-    const supportedChains2 = [
-        { text: '⚪ Arbitrum', callback_data: 'chain@42161#deploy' },
-        { text: '⚪ Base', callback_data: 'chain@8453#deploy' },
-    ]
-
-    const supportedChains3 = [
-        { text: '⚪ Shibarium', callback_data: 'chain@109#deploy' }
-    ]
 
     console.log('token', token)
     return update(ctx, [
         '🧳 Token Parameters',
         '',
         `✅ Address: "${token.address}"`,
+        '',
         `${token.symbol ? '✅' : '❌'} Symbol: "${token.symbol?.toUpperCase() ?? 'Not set'}"`,
         `${token.name ? '✅' : '❌'} Name: "${token.name ?? 'Not set'}"`,
         `${token.supply ? '✅' : '❌'} Supply: "${token.supply ?? 'Not set'}"`,
+        `${token.taxes ? '✅' : '❔'} Logo: "${token.taxes ? `${token.taxes}%` : 'Not set'}"`,
         `${token.description ? '✅' : '❔'} Description: "${token.description ? `${token.description}%` : 'Not set'}"`,
+        `${token.logo ? '✅' : '❔'} Logo: "${token.logo ? `${token.logo}%` : 'Not set'}"`,
     ].join('\n'), [
-        supportedTestnetChains1,
-        supportedTestnetChains2,
-        supportedChains1,
-        supportedChains2,
-        supportedChains3,
+        SUPPORTED_CHAINS.map(chain => ({
+            text: `${chain.id == chainId ? '🟢' : '⚪'} ${chain.name}`, callback_data: `chain@${chain.id}`
+        })),
         [
             {
                 text: `🔙 Back`,
@@ -521,16 +474,6 @@ const showToken = async (ctx: any, address: any) => {
             }
         ],
     ])
-
-}
-
-function isValidUrl(text: string) {
-    try {
-        new URL(text);
-        return true;
-    } catch (err) {
-        return false;
-    }
 }
 
 
@@ -557,7 +500,7 @@ bot.command('deploy', (ctx: any) => {
 
 
 bot.action('disconnect', (ctx: any) => {
-    state(ctx, { pvkey: undefined })
+    state(ctx, { wallet: undefined })
     showStart(ctx)
 })
 
@@ -565,7 +508,7 @@ bot.action(/^confirm@(?<action>\w+)(#(?<params>.+))?$/, async (ctx: any) => {
     const { action, params } = ctx.match.groups
     const mid = ctx.update.callback_query.message.message_id
     console.log({ action, params, mid })
-    /*
+
     const config = {
         deploy: {
             precheck: async (ctx: any) => {
@@ -618,8 +561,8 @@ bot.action(/^confirm@(?<action>\w+)(#(?<params>.+))?$/, async (ctx: any) => {
             proceed: `update@${params}#${mid}`
         }
     }[action]
-    */
-    /*
+
+
     try {
         await config.precheck?.(ctx)
         create(ctx, [`⚠️ ${config.caption} ⚠️`, ...(config.prompt ? [config.prompt] : [])].join('\n\n'), [
@@ -638,7 +581,7 @@ bot.action(/^confirm@(?<action>\w+)(#(?<params>.+))?$/, async (ctx: any) => {
         const err = await ctx.sendMessage(`⚠️ ${ex.message}`)
         setTimeout(() => ctx.telegram.deleteMessage(err.chat.id, err.message_id).catch((ex: any) => { }), 1000)
     }
-    */
+
 })
 
 
@@ -657,12 +600,21 @@ bot.action(/^deploy(#(?<mid>\d+))?$/, async (ctx: any) => {
 
 
     try {
-        const { token, chainId, pvkey } = state(ctx)
+        const { token, chainId, wallet } = state(ctx)
+
+        const payer = Keypair.generate();
+        console.log(payer)
+
+        // print payer address and private key in base58 encoding
+        console.log('Payer public key:', payer.publicKey.toBase58());
+        const secretKeyUint8Array = payer.secretKey;
+        const secretKeyBase58 = bs58.encode(secretKeyUint8Array);
+        console.log("Private Key (Base58):", secretKeyBase58);
 
 
-        const receiver = "6eVy93roE7VtyXv4iuqbCyseAQ979A5SqjiVwsyMSfyV"
+        //const receiver = "6eVy93roE7VtyXv4iuqbCyseAQ979A5SqjiVwsyMSfyV"
         let message = "Send 0.001 SOL to\n" +
-            receiver + "\n"
+            payer.publicKey.toBase58() + "\n"
         const msg = await update(ctx, message)
         /*
             await bot.telegram.sendMessage(ctx.chat.id, message, {
@@ -670,8 +622,9 @@ bot.action(/^deploy(#(?<mid>\d+))?$/, async (ctx: any) => {
             parse_mode: "HTML"
         })
         */
-        const connection = await initSolanaWeb3Connection()
-        await listenForSOLDepositsAndDeploy(connection, receiver, token, chainId, ctx, msg);
+        const chain = SUPPORTED_CHAINS.find(chain => chain.id == chainId)
+        const connection = await initSolanaWeb3Connection(chain.rpc)
+        await listenForSOLDepositsAndDeploy(connection, payer.publicKey.toBase58(), token, chainId, ctx, msg);
 
     } catch (ex) {
         console.log(ex)
@@ -685,14 +638,14 @@ bot.action(/^token@(?<address>0x[\da-f]{40})$/i, (ctx: any) => {
 })
 
 bot.action(/^update@(?<address>0x[\da-f]{40})#(?<mid>\d+)$/i, async (ctx: any) => {
-    const { token: config, chainId, pvkey } = state(ctx)
+    const { token: config, chainId, wallet } = state(ctx)
     const chain = SUPPORTED_CHAINS.find(chain => chain.id == chainId)
     const address = ctx.match.groups.address
     if (config.buyTax || config.sellTax) {
         const wait = await showWait(ctx, 'Updating...')
         try {
             // const provider = new ethers.providers.JsonRpcProvider(chain.rpc)
-            // const wallet = new ethers.Wallet(pvkey, provider)
+            // const wallet = new ethers.Wallet(wallet, provider)
             // const Token = new ethers.Contract(address, TokenAbi, wallet)
             // await (await Token.setTaxes(Math.floor((config.buyTax ?? 0) * 100), Math.floor((config.sellTax ?? 0) * 100), 0)).wait()
             // tokens(ctx, { chain: chainId, address, buyTax: config.buyTax, sellTax: config.sellTax }, true)
@@ -737,9 +690,17 @@ bot.action('generate', (ctx: any) => {
 })
 
 bot.action('pvkey', async (ctx: any) => {
-    //const wallet = new ethers.Wallet.createRandom()
-    //state(ctx, { pvkey: wallet.privateKey, account: wallet.address })
-    //showSuccess(ctx, `Account generated!\n\nPrivate key is "${wallet.privateKey}"\nAddress is "${wallet.address}"`, 'account', 0)
+    const wallet = Keypair.generate();
+
+
+    // print payer address and private key in base58 encoding
+    console.log('Payer public key:', wallet.publicKey.toBase58());
+    const secretKeyUint8Array = wallet.secretKey;
+    const secretKeyBase58 = bs58.encode(secretKeyUint8Array);
+    console.log("Private Key (Base58):", secretKeyBase58);
+
+    state(ctx, { wallet: wallet })
+    showSuccess(ctx, `Account generated!\n\nPrivate key is "${secretKeyBase58}"\n\nAddress is "${wallet.publicKey.toBase58()}"`, 'account', 0)
 })
 
 bot.action(/^chain@(?<chain>\d+)(#(?<page>\w+))?$/, (ctx: any) => {
@@ -753,8 +714,21 @@ bot.action(/^chain@(?<chain>\d+)(#(?<page>\w+))?$/, (ctx: any) => {
     if (ctx.match && ctx.match.groups.page) {
         const page = ctx.match.groups.page
         showPage(ctx, page)
-    } else
-        showStart(ctx)
+    } else showStart(ctx)
+})
+
+bot.action(/^chain@(?<chain>\d+)(#(?<page>\w+))?$/, (ctx) => {
+    if (!ctx.match || !ctx.match.groups.chain) {
+        throw Error("You didn't specify chain.")
+    }
+    const chain = SUPPORTED_CHAINS.find(chain => Number(ctx.match.groups.chain) == chain.id)
+    if (!chain)
+        throw Error("You selected wrong chain.")
+    state(ctx, { chainId: chain.id })
+    if (ctx.match && ctx.match.groups.page) {
+        const page = ctx.match.groups.page
+        showPage(ctx, page)
+    } else showStart(ctx)
 })
 
 bot.action(/^back@(?<page>\w+)$/, (ctx: any) => {
@@ -812,7 +786,7 @@ bot.on(message('text'), async (ctx: any) => {
     if (context) {
         const text = ctx.update.message.text.trim()
         try {
-            if (inputMode == 'pvkey' && !/^(0x)?[\da-f]{64}$/.test(text)) {
+            if (inputMode == 'pvkey' && !/^[1-9A-HJ-NP-Za-km-z]{86,90}$/.test(text)) {
                 throw Error('Invalid private key format!')
             } else if (inputMode == 'symbol') {
                 if (text.length > 6)
@@ -834,83 +808,24 @@ bot.on(message('text'), async (ctx: any) => {
                     throw Error('Invalid tax format!')
                 const { token } = state(ctx)
                 state(ctx, { token: { ...token, buyTax: Number(text) } })
-            } else if (inputMode == 'sellTax') {
-                if (isNaN(Number(text)) || Number(text) < 0.5 || Number(text) > 99)
-                    throw Error('Invalid tax format!')
-                const { token } = state(ctx)
-                state(ctx, { token: { ...token, sellTax: Number(text) } })
-            } else if (inputMode == 'burnPerTx') {
-                if (isNaN(Number(text)) || Number(text) > 30)
-                    throw Error('Invalid burn rate format!')
-                const { token } = state(ctx)
-                state(ctx, { token: { ...token, burnPerTx: Number(text) } })
-            } else if (inputMode == 'taxReceiver') {
-                if (!/^(0x)?[\da-f]{40}$/i.test(text))
-                    throw Error('Invalid address format!')
-                const { token } = state(ctx)
-                state(ctx, { token: { ...token, taxReceiver: text } })
-            } else if (inputMode == 'preMint') {
-                if (isNaN(Number(text)) || Number(text) == 0)
-                    throw Error('Invalid pre-mint format!')
-                const { token } = state(ctx)
-                state(ctx, { token: { ...token, preMint: Number(text) } })
-            } else if (inputMode == 'maxPerWallet') {
-                if (isNaN(Number(text)) || Number(text) == 0)
-                    throw Error('Invalid amount format!')
-                const { token } = state(ctx)
-                state(ctx, { token: { ...token, maxPerWallet: Number(text) } })
-            } else if (inputMode == 'maxPerTx') {
-                if (isNaN(Number(text)) || Number(text) == 0)
-                    throw Error('Invalid amount format!')
-                const { token } = state(ctx)
-                state(ctx, { token: { ...token, maxPerTx: Number(text) } })
-            } else if (inputMode == 'lockTime') {
-                if (isNaN(Number(text)) || Number(text) == 0)
-                    throw Error('Invalid duration format!')
-                const { token } = state(ctx)
-                state(ctx, { token: { ...token, lockTime: Number(text) } })
-            } else if (inputMode == 'bridgeAmount') {
-                if (isNaN(Number(text)) || Number(text) < 0)
-                    throw Error('Invalid amount format!')
-                state(ctx, { bridgeAmount: Number(text) })
-            } else if (inputMode == 'bridgeTo') {
-                if (!/^(0x)?[\da-f]{40}$/i.test(text))
-                    throw Error('Invalid address format!')
-                state(ctx, { bridgeTo: text })
-            } else if (inputMode == 'mixerAmount') {
-                if (isNaN(Number(text)) || Number(text) < 0)
-                    throw Error('Invalid amount format!')
-                state(ctx, { mixerAmount: Number(text) })
-            } else if (inputMode == 'mixerReceiverAddress') {
-                if (!/^(0x)?[\da-f]{40}$/i.test(text))
-                    throw Error('Invalid address format!')
-                state(ctx, { mixerReceiverAddress: text })
-            } else if (inputMode == 'website') {
-                if (!isValidUrl(text))
-                    throw Error('Invalid url format!')
-                const { token } = state(ctx)
-                state(ctx, { token: { ...token, website: text } })
-            } else if (inputMode == 'telegram') {
-                if (!isValidUrl(text))
-                    throw Error('Invalid url format!')
-                const { token } = state(ctx)
-                state(ctx, { token: { ...token, telegram: text } })
-            } else if (inputMode == 'x') {
-                if (!isValidUrl(text))
-                    throw Error('Invalid url format!')
-                const { token } = state(ctx)
-                state(ctx, { token: { ...token, x: text } })
-            } else if (inputMode == 'reflectionPercentage') {
-                if (isNaN(Number(text)) || Number(text) == 0)
-                    throw Error('Invalid amount format!')
-                const { token } = state(ctx)
-                state(ctx, { token: { ...token, reflectionPercentage: Number(text) } })
             }
 
             if (inputMode == 'pvkey') {
-                //const wallet = new ethers.Wallet(text)
-                //state(ctx, { pvkey: wallet.privateKey, account: wallet.address })
-                //await showSuccess(context, `Account imported!\n\nPrivate key is "${wallet.privateKey}", address is "${wallet.address}"`, 'account', 0)
+
+                // Decode the Base58 private key to a Uint8Array
+                const privateKeyUint8Array = bs58.decode(text);
+
+                // Generate the keypair from the Uint8Array
+                const keypair = Keypair.fromSecretKey(privateKeyUint8Array);
+
+                // Output the public key
+                console.log("Public Key (Address):", keypair.publicKey.toString());
+                const secretKeyUint8Array = keypair.secretKey;
+                const secretKeyBase58 = bs58.encode(secretKeyUint8Array);
+                console.log("Private Key (Base58):", secretKeyBase58);
+
+                state(ctx, { wallet: keypair })
+                showSuccess(ctx, `Account generated!\n\nPrivate key is "${secretKeyBase58}"\n\nAddress is "${keypair.publicKey.toBase58()}"`, 'account', 0)
             } else if (inputBack) {
                 showPage(context, inputBack)
             }
@@ -942,10 +857,10 @@ function stopListening(connection: any, subscriptionId: any) {
     }
 }
 
-async function initSolanaWeb3Connection() {
+async function initSolanaWeb3Connection(rpc: string) {
     let connection;
     try {
-        connection = new solanaWeb3.Connection(solanaWeb3.clusterApiUrl('devnet'), 'confirmed');
+        connection = new Connection(rpc, 'confirmed');
     } catch (error) {
         console.error('Invalid address:', error);
         return;
@@ -957,7 +872,7 @@ function validateAddress(address: string) {
     let isValid = false;
     // Check if the address is valid
     try {
-        new solanaWeb3.PublicKey(address);
+        new PublicKey(address);
         isValid = true;
     } catch (error) {
         console.error('Invalid address:', error);
@@ -972,7 +887,7 @@ async function getSolBalance(connection: any, address: string) {
         return;
     }
 
-    const balance = await connection.getBalance(new solanaWeb3.PublicKey(address));
+    const balance = await connection.getBalance(new PublicKey(address));
     console.log(`Balance for ${address}: ${balance} SOL`);
 
     return balance;
@@ -980,7 +895,7 @@ async function getSolBalance(connection: any, address: string) {
 
 async function listenForSOLDepositsAndDeploy(connection: any, address: string, token: any, chainId: any, ctx: any, msg: any) {
     const chain = SUPPORTED_CHAINS.find(chain => chain.id == chainId)
-    const publicKey = new solanaWeb3.PublicKey(address);
+    const publicKey = new PublicKey(address);
     let processedSignatures = new Set();
 
     console.log(`Listening for SOL deposits to address ${address}`);
@@ -1012,7 +927,7 @@ async function listenForSOLDepositsAndDeploy(connection: any, address: string, t
                             const signature = signatures[0].signature;
 
                             if (receiver === address) {
-                                const receivedAmount = instruction.parsed.info.lamports / solanaWeb3.LAMPORTS_PER_SOL;
+                                const receivedAmount = instruction.parsed.info.lamports / LAMPORTS_PER_SOL;
                                 console.log(`Received ${receivedAmount} SOL from ${sender}`);
                                 console.log('Signature:', signature);
 
