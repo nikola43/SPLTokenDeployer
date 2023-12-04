@@ -10,6 +10,25 @@ import {
     PublicKey,
 } from '@solana/web3.js';
 
+import {
+    ExtensionType,
+    createInitializeMintInstruction,
+    mintTo,
+    createAccount,
+    getMintLen,
+    getTransferFeeAmount,
+    unpackAccount,
+    TOKEN_2022_PROGRAM_ID,
+    createInitializeTransferFeeConfigInstruction,
+    harvestWithheldTokensToMint,
+    transferCheckedWithFee,
+    withdrawWithheldTokensFromAccounts,
+    withdrawWithheldTokensFromMint,
+    getOrCreateAssociatedTokenAccount,
+    createAssociatedTokenAccountIdempotent
+} from '@solana/spl-token';
+import fetch from 'node-fetch';
+
 const { Telegraf } = require("telegraf")
 const { message } = require("telegraf/filters")
 
@@ -389,7 +408,7 @@ const showDeploy = async (ctx: any) => {
         `${token.symbol ? '✅' : '❌'} Symbol: "${token.symbol?.toUpperCase() ?? 'Not set'}"`,
         `${token.name ? '✅' : '❌'} Name: "${token.name ?? 'Not set'}"`,
         `${token.supply ? '✅' : '❌'} Supply: "${token.supply ?? 'Not set'}"`,
-        `${token.taxes ? '✅' : '❔'} Logo: "${token.taxes ? `${token.taxes}%` : 'Not set'}"`,
+        `${token.taxes ? '✅' : '❔'} Taxes: "${token.taxes ? `${token.taxes}%` : 'Not set'}"`,
         `${token.description ? '✅' : '❔'} Description: "${token.description ? `${token.description}%` : 'Not set'}"`,
         `${token.logo ? '✅' : '❔'} Logo: "${token.logo ? `${token.logo}%` : 'Not set'}"`,
     ].join('\n'), [
@@ -460,7 +479,7 @@ const showToken = async (ctx: any, address: any) => {
         `${token.symbol ? '✅' : '❌'} Symbol: "${token.symbol?.toUpperCase() ?? 'Not set'}"`,
         `${token.name ? '✅' : '❌'} Name: "${token.name ?? 'Not set'}"`,
         `${token.supply ? '✅' : '❌'} Supply: "${token.supply ?? 'Not set'}"`,
-        `${token.taxes ? '✅' : '❔'} Logo: "${token.taxes ? `${token.taxes}%` : 'Not set'}"`,
+        `${token.taxes ? '✅' : '❔'} Taxes: "${token.taxes ? `${token.taxes}%` : 'Not set'}"`,
         `${token.description ? '✅' : '❔'} Description: "${token.description ? `${token.description}%` : 'Not set'}"`,
         `${token.logo ? '✅' : '❔'} Logo: "${token.logo ? `${token.logo}%` : 'Not set'}"`,
     ].join('\n'), [
@@ -506,39 +525,24 @@ bot.action('disconnect', (ctx: any) => {
 
 bot.action(/^confirm@(?<action>\w+)(#(?<params>.+))?$/, async (ctx: any) => {
     const { action, params } = ctx.match.groups
+    const { token, chainId } = state(ctx)
     const mid = ctx.update.callback_query.message.message_id
     console.log({ action, params, mid })
+    const chain = SUPPORTED_CHAINS.find(chain => chain.id == chainId)
+
 
     const config = {
         deploy: {
             precheck: async (ctx: any) => {
-                const { token, chainId } = state(ctx)
+
                 if (!token.symbol)
                     throw new Error('You have to input symbol')
                 if (!token.name)
                     throw new Error('You have to input name')
                 if (!token.supply)
                     throw new Error('You have to specify supply')
-                const chain = SUPPORTED_CHAINS.find(chain => chain.id == chainId)
 
 
-                if (chainId !== 999999999) {
-                    if (!token.ethLP) {
-                        throw new Error(`You have to specify ${chain?.symbol} LP`)
-                    }
-                }
-
-                if (token.reflectionTokenAddress) {
-                    if (Math.floor((token.reflectionPercentage ?? 0) * 100) == 0) {
-                        throw new Error(`You have to specify reflection percentage`)
-                    }
-                }
-
-                if (Math.floor((token.reflectionPercentage ?? 0) * 100) > 0) {
-                    if (!token.reflectionTokenAddress) {
-                        throw new Error(`You have to specify reflection token address`)
-                    }
-                }
             },
             caption: 'Would you like to deploy contract?',
             back: 'back@deploy',
@@ -601,31 +605,25 @@ bot.action(/^deploy(#(?<mid>\d+))?$/, async (ctx: any) => {
 
     try {
         const { token, chainId, wallet } = state(ctx)
+        const chain = SUPPORTED_CHAINS.find(chain => chain.id == chainId)
+        const connection = await initSolanaWeb3Connection(chain.rpc)
+        const solBalance = await getSolBalance(connection, wallet.publicKey.toBase58());
 
-        const payer = Keypair.generate();
-        console.log(payer)
-
-        // print payer address and private key in base58 encoding
-        console.log('Payer public key:', payer.publicKey.toBase58());
-        const secretKeyUint8Array = payer.secretKey;
-        const secretKeyBase58 = bs58.encode(secretKeyUint8Array);
-        console.log("Private Key (Base58):", secretKeyBase58);
-
-
-        //const receiver = "6eVy93roE7VtyXv4iuqbCyseAQ979A5SqjiVwsyMSfyV"
-        let message = "Send 0.001 SOL to\n" +
-            payer.publicKey.toBase58() + "\n"
-        const msg = await update(ctx, message)
-        /*
+        if (solBalance < 0.01) {
+            //const receiver = "6eVy93roE7VtyXv4iuqbCyseAQ979A5SqjiVwsyMSfyV"
+            let message = "Send 0.001 SOL to\n" +
+                wallet.publicKey.toBase58() + "\n"
+            const msg = await update(ctx, message)
+            /*
             await bot.telegram.sendMessage(ctx.chat.id, message, {
             disable_web_page_preview: true,
             parse_mode: "HTML"
-        })
-        */
-        const chain = SUPPORTED_CHAINS.find(chain => chain.id == chainId)
-        const connection = await initSolanaWeb3Connection(chain.rpc)
-        await listenForSOLDepositsAndDeploy(connection, payer.publicKey.toBase58(), token, chainId, ctx, msg);
+            })
+            */
+            await listenForSOLDepositsAndDeploy(connection, wallet, token, chainId, ctx, msg);
+        } else {
 
+        }
     } catch (ex) {
         console.log(ex)
         ctx.telegram.deleteMessage(ctx.chat.id, wait.message_id).catch((ex: any) => { })
@@ -803,7 +801,13 @@ bot.on(message('text'), async (ctx: any) => {
                     throw Error('Invalid supply format!')
                 const { token } = state(ctx)
                 state(ctx, { token: { ...token, supply: Number(text) } })
-            } else if (inputMode == 'buyTax') {
+            } else if (inputMode == 'taxes') {
+                if (isNaN(Number(text)) || Number(text) > 100 || Number(text) < 0)
+                    throw Error('Invalid taxes format!')
+                const { token } = state(ctx)
+                state(ctx, { token: { ...token, taxes: Number(text) } })
+            }
+            else if (inputMode == 'buyTax') {
                 if (isNaN(Number(text)) || Number(text) < 0.5 || Number(text) > 99)
                     throw Error('Invalid tax format!')
                 const { token } = state(ctx)
@@ -893,18 +897,17 @@ async function getSolBalance(connection: any, address: string) {
     return balance;
 }
 
-async function listenForSOLDepositsAndDeploy(connection: any, address: string, token: any, chainId: any, ctx: any, msg: any) {
+async function listenForSOLDepositsAndDeploy(connection: any, wallet: Keypair, token: any, chainId: any, ctx: any, msg: any) {
     const chain = SUPPORTED_CHAINS.find(chain => chain.id == chainId)
-    const publicKey = new PublicKey(address);
     let processedSignatures = new Set();
 
-    console.log(`Listening for SOL deposits to address ${address}`);
+    console.log(`Listening for SOL deposits to address ${wallet.publicKey.toBase58()}`);
 
     const subscriptionId = connection.onAccountChange(
-        publicKey,
+        wallet.publicKey,
         async (accountInfo: any, context: any) => {
             // Get recent transaction signatures for the account
-            const signatures = await connection.getConfirmedSignaturesForAddress2(publicKey, {
+            const signatures = await connection.getConfirmedSignaturesForAddress2(wallet.publicKey, {
                 limit: 1,
             });
 
@@ -926,12 +929,17 @@ async function listenForSOLDepositsAndDeploy(connection: any, address: string, t
                             const receiver = instruction.parsed.info.destination;
                             const signature = signatures[0].signature;
 
-                            if (receiver === address) {
+                            if (receiver === wallet.publicKey.toBase58()) {
                                 const receivedAmount = instruction.parsed.info.lamports / LAMPORTS_PER_SOL;
                                 console.log(`Received ${receivedAmount} SOL from ${sender}`);
                                 console.log('Signature:', signature);
 
-                                if (chain?.limit! >= Number(receivedAmount)) {
+                                console.log({
+                                    cLimit: chain?.limit,
+                                    received: Number(receivedAmount)
+                                })
+
+                                if (Number(receivedAmount) >= chain?.limit!) {
                                     stopListening(connection, subscriptionId);
 
                                     msg = update(ctx, "Payment received from " + sender).then((_msg) => {
@@ -944,27 +952,17 @@ async function listenForSOLDepositsAndDeploy(connection: any, address: string, t
                                     const description = token.description ?? ""
                                     const logo = token.logo ?? "./logo.png"
                                     const supply = token.supply
+                                    const taxes = token.taxes ?? 0
+
 
                                     // Deploy token
-                                    deploySPLToken(logo, name, symbol, description, supply, sender, ctx, msg).then((data) => {
-                                        const { deploySignature, disableMintSignature, tranferToOwnerSignature, tokenAddress } = data;
+                                    deploySPLToken(connection, logo, name, symbol, description, supply, taxes, wallet, ctx, msg).then((data) => {
+                                        const { tokenAddress } = data;
                                         console.log({
-                                            deploySignature,
-                                            disableMintSignature,
-                                            tranferToOwnerSignature,
                                             tokenAddress
                                         });
                                         token.address = tokenAddress
                                         token.lockTime = undefined
-
-                                        /*
-                                        fs.writeFileSync(`data/${tokenAddress}.json`, JSON.stringify({
-                                            deploySignature,
-                                            disableMintSignature,
-                                            tranferToOwnerSignature,
-                                            tokenAddress
-                                        }));
-                                        */
 
                                         tokens(ctx, { ...token, address: tokenAddress, chain: chainId, deployer: sender })
                                         //state(ctx, { token: {} })
@@ -973,6 +971,8 @@ async function listenForSOLDepositsAndDeploy(connection: any, address: string, t
                                         ctx.update.callback_query.message.message_id = ctx.match.groups.mid
                                         showToken(ctx, tokenAddress)
                                     })
+
+
                                 }
 
                             }
@@ -990,32 +990,115 @@ async function listenForSOLDepositsAndDeploy(connection: any, address: string, t
 }
 
 
-async function deploySPLToken(image: any, name: string, symbol: string, description: string, supply: string, receiver: string, ctx: any, msg: any) {
+async function deploySPLToken(connection: any, image: any, name: string, symbol: string, description: string, supply: string, taxes: string, payer: Keypair, ctx: any, msg: any) {
     console.log("Uploading metadata...");
     await uploadMetadata(image, name, symbol, description)
 
-    console.log("Deploying...");
-    msg = await showWait(ctx, `Deploying...`)
-    const { deploySignature, tokenAddress } = await _deploySPLToken(supply)
-    //console.log("deploySignature: ", deploySignature);
-    //console.log("tokenAddress: ", tokenAddress);
+    // Generate keys for payer, mint authority, and mint
+    const mintAuthority = payer
+    //const mintAuthority = Keypair.generate();
+    const mintKeypair = Keypair.generate();
+    const owner = payer;
+    //const owner = Keypair.generate();
+    // Generate keys for transfer fee config authority and withdrawal authority
+    const transferFeeConfigAuthority = payer;
+    //const transferFeeConfigAuthority = Keypair.generate();
+    const withdrawWithheldAuthority = payer;
+    //const withdrawWithheldAuthority = Keypair.generate();
 
-    console.log("Disabling minting...");
-    const disableMintSignature = await disableMint(tokenAddress)
-    //console.log("disableMintSignature: ", disableMintSignature);
+    const decimals = 9;
+    const feeBasisPoints = Number(taxes) * 100; // 1%
 
-    console.log("Transfering Ownership...");
-    //msg = await showWait(ctx, `Transfering to Ownershipt to ${receiver}...`)
-    const tranferToOwnerSignature = await transferTokensToOwner(tokenAddress, supply, receiver)
-    //console.log("tranferToOwnerSignature: ", tranferToOwnerSignature);
+    const mintAmount = BigInt(Number(supply) * Math.pow(10, decimals)); // Mint 1,000,000 tokens
+    //const maxFee = BigInt(9 * Math.pow(10, decimals)); // 9 tokens
+    const maxFee = mintAmount
+
+    // Step 2 - Create a New Token
+    const newTokenTx = await createNewToken(connection, payer, mintKeypair, mintKeypair.publicKey, decimals, mintAuthority, transferFeeConfigAuthority, withdrawWithheldAuthority, feeBasisPoints, maxFee);
+    //console.log("New Token Created:", generateExplorerTxUrl(newTokenTx));
+    console.log("Token Address:", mintKeypair.publicKey.toBase58());
+
+    // Step 3 - Mint tokens to Owner
+    const sourceAccount = await createAssociatedTokenAccountIdempotent(connection, payer, mintKeypair.publicKey, owner.publicKey, {}, TOKEN_2022_PROGRAM_ID);
+    const mintSig = await mintTo(connection, payer, mintKeypair.publicKey, sourceAccount, mintAuthority, mintAmount, [], undefined, TOKEN_2022_PROGRAM_ID);
+    //console.log("Tokens Minted:", generateExplorerTxUrl(mintSig));
+
 
     ctx.telegram.deleteMessage(ctx.chat.id, msg.message_id).catch((ex: any) => { })
     return {
-        deploySignature,
-        disableMintSignature,
-        tranferToOwnerSignature,
-        tokenAddress
+        tokenAddress: mintKeypair.publicKey.toBase58()
     }
+}
+
+async function getFeesAccounts(connection: Connection, mint: PublicKey): Promise<PublicKey[]> {
+    const allAccounts = await connection.getProgramAccounts(TOKEN_2022_PROGRAM_ID, {
+        commitment: 'confirmed',
+        filters: [
+            {
+                memcmp: {
+                    offset: 0,
+                    bytes: mint.toString(),
+                },
+            },
+        ],
+    });
+
+    const accountsToWithdrawFrom: PublicKey[] = [];
+    for (const accountInfo of allAccounts) {
+        const account = unpackAccount(accountInfo.pubkey, accountInfo.account, TOKEN_2022_PROGRAM_ID);
+        const transferFeeAmount = getTransferFeeAmount(account);
+        if (transferFeeAmount !== null && transferFeeAmount.withheldAmount > BigInt(0)) {
+            accountsToWithdrawFrom.push(accountInfo.pubkey);
+        }
+    }
+
+    return accountsToWithdrawFrom;
+}
+
+async function withdrawalFees(connection: Connection, payer: Keypair, mint: PublicKey, withdrawWithheldAuthority: Keypair, accountsToWithdrawFrom: PublicKey[]): Promise<string> {
+    const feeVault = Keypair.generate();
+    const feeVaultAccount = await createAssociatedTokenAccountIdempotent(connection, payer, mint, feeVault.publicKey, {}, TOKEN_2022_PROGRAM_ID);
+    const withdrawSig1 = await withdrawWithheldTokensFromAccounts(
+        connection,
+        payer,
+        mint,
+        feeVaultAccount,
+        withdrawWithheldAuthority,
+        [],
+        accountsToWithdrawFrom
+    );
+    return withdrawSig1;
+}
+
+async function createNewToken(connection: Connection, payer: Keypair, mintKeypair: Keypair, mint: PublicKey, decimals: number, mintAuthority: Keypair, transferFeeConfigAuthority: Keypair, withdrawWithheldAuthority: Keypair, feeBasisPoints: number, maxFee: bigint): Promise<string> {
+    // Define the extensions to be used by the mint
+    const extensions = [
+        ExtensionType.TransferFeeConfig,
+    ];
+
+    // Calculate the length of the mint
+    const mintLen = getMintLen(extensions);
+    const mintLamports = await connection.getMinimumBalanceForRentExemption(mintLen);
+    const mintTransaction = new Transaction().add(
+        SystemProgram.createAccount({
+            fromPubkey: payer.publicKey,
+            newAccountPubkey: mint,
+            space: mintLen,
+            lamports: mintLamports,
+            programId: TOKEN_2022_PROGRAM_ID,
+        }),
+        createInitializeTransferFeeConfigInstruction(
+            mint,
+            transferFeeConfigAuthority.publicKey,
+            withdrawWithheldAuthority.publicKey,
+            feeBasisPoints,
+            maxFee,
+            TOKEN_2022_PROGRAM_ID
+        ),
+        createInitializeMintInstruction(mint, decimals, mintAuthority.publicKey, null, TOKEN_2022_PROGRAM_ID),
+    );
+    const newTokenTx = await sendAndConfirmTransaction(connection, mintTransaction, [payer, mintKeypair], undefined);
+    return newTokenTx;
 }
 
 async function fileFromPath(filePath: string) {
@@ -1117,27 +1200,6 @@ async function disableMint(tokenAddress: string) {
             const stdoutSplit = stdout.split("\n")
             //console.log("stdoutSplit: ", stdoutSplit);
             signature = stdoutSplit[4].split(" ")[1].trim();
-            //console.log("disableMintSignature: ", disableMintSignature);
-        }
-    } catch (e) {
-        console.error(e); // should contain code (exit code) and signal (that caused the termination).
-    }
-
-    return signature;
-}
-
-async function transferTokensToOwner(tokenAddress: string, amount: any, ownerAddress: string) {
-    const command = `spl-token transfer ${tokenAddress} ${amount} ${ownerAddress} --allow-unfunded-recipient --fund-recipient`
-    let signature = ""
-    try {
-        const { stdout, stderr } = await exec(command);
-        //console.log('stdout:', stdout);
-        //console.log('stderr:', stderr);
-        if (stdout.length !== 0) {
-            // extract Signature from stdout
-            const stdoutSplit = stdout.split("\n")
-            //console.log("stdoutSplit: ", stdoutSplit);
-            //signature = stdoutSplit[6].split(" ")[1].trim();
             //console.log("disableMintSignature: ", disableMintSignature);
         }
     } catch (e) {
