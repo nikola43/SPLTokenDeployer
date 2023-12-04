@@ -8,9 +8,15 @@ import {
     LAMPORTS_PER_SOL,
     Cluster,
     PublicKey,
+    clusterApiUrl,
+    TransactionInstruction,
 } from '@solana/web3.js';
 
-import { DataV2, createCreateMetadataAccountV3Instruction } from '@metaplex-foundation/mpl-token-metadata';
+
+
+import { createMetadataAccountV3, CreateMetadataAccountV3InstructionAccounts, CreateMetadataAccountV3InstructionArgs } from '@metaplex-foundation/mpl-token-metadata'
+import { fromWeb3JsPublicKey, toWeb3JsPublicKey, fromWeb3JsKeypair } from '@metaplex-foundation/umi-web3js-adapters'
+import { createUmi } from '@metaplex-foundation/umi-bundle-defaults'
 
 import {
     ExtensionType,
@@ -36,7 +42,7 @@ const bs58 = require('bs58');
 //const connection = new Connection('http://127.0.0.1:8899', 'confirmed');
 const connection = new Connection('https://api.devnet.solana.com', 'confirmed');
 import uploadMetadataForToken from "./utils"
-import { UploadMetadataInput } from '@metaplex-foundation/js';
+import { createSignerFromKeypair } from '@metaplex-foundation/umi';
 
 
 // Set the decimals, fee basis points, and maximum fee
@@ -202,72 +208,83 @@ async function createNewToken(connection: Connection, payer: Keypair, mintKeypai
     // Define the extensions to be used by the mint
     const extensions = [
         ExtensionType.TransferFeeConfig,
+        ExtensionType.MetadataPointer
     ];
 
-    const mplProgramId = new PublicKey("metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s");
+    const keypair: Keypair = importWallet("7biAatNGZT48M4n7bvKrz9k7CPvdDQkh3EsPRm7msgXj4GsFwf51CmF1kq8xZyWrbhmtJmy3Fwp6stcbXMwqzJF");
 
-    const [metadataPDA] = PublicKey.findProgramAddressSync([
+
+    // Calculate the length of the mint
+    const mintLen = getMintLen(extensions);
+    const mintLamports = await connection.getMinimumBalanceForRentExemption(mintLen);
+    const createAccountInstrunctions = await _createAccountInstrunctions(payer, mint, mintLen, mintLamports)
+    const createInitializeTransferFeeConfigInstructions = await _createInitializeTransferFeeConfigInstruction(mint, transferFeeConfigAuthority.publicKey, withdrawWithheldAuthority.publicKey, feeBasisPoints, maxFee);
+    const createInitializeMintInstructions = createInitializeMintInstruction(mint, decimals, mintAuthority.publicKey, null, TOKEN_2022_PROGRAM_ID);
+
+    const mplProgramId = new PublicKey("metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s");
+    const mintA = createInitializeTransferFeeConfigInstructions.keys[0].pubkey
+
+    const [metadata] = PublicKey.findProgramAddressSync([
         Buffer.from("metadata"),
         mplProgramId.toBytes(),
         mint.toBytes()
     ], mplProgramId);
 
+    console.log({
+        txIns: createAccountInstrunctions.keys,
+        inTx: createInitializeTransferFeeConfigInstructions.keys,
+        metadata
+    })
 
-    const MY_TOKEN_METADATA: UploadMetadataInput = {
-        name: "Test Token",
-        symbol: "TEST",
-        description: "This is a test token!",
-        image: "https://URL_TO_YOUR_IMAGE.png" //add public URL to image you'd like to use
-    }
+    const createInitializeMetadataPointerInstructions = await _createInitializeMetadataPointerInstructions(metadata, mintAuthority.publicKey)
 
-    const ON_CHAIN_METADATA = {
-        name: MY_TOKEN_METADATA.name,
-        symbol: MY_TOKEN_METADATA.symbol,
-        uri: 'TO_UPDATE_LATER',
-        sellerFeeBasisPoints: 0,
-        creators: null,
-        collection: null,
-        uses: null
-    } as DataV2;
-
-    // Calculate the length of the mint
-    const mintLen = getMintLen(extensions);
-    const mintLamports = await connection.getMinimumBalanceForRentExemption(mintLen);
-    const mintTransaction = new Transaction().add(
-        SystemProgram.createAccount({
-            fromPubkey: payer.publicKey,
-            newAccountPubkey: mint,
-            space: mintLen,
-            lamports: mintLamports,
-            programId: TOKEN_2022_PROGRAM_ID,
-        }),
-        createInitializeTransferFeeConfigInstruction(
-            mint,
-            transferFeeConfigAuthority.publicKey,
-            withdrawWithheldAuthority.publicKey,
-            feeBasisPoints,
-            maxFee,
-            TOKEN_2022_PROGRAM_ID
-        ),
-        createInitializeMintInstruction(mint, decimals, mintAuthority.publicKey, null, TOKEN_2022_PROGRAM_ID),
-        createCreateMetadataAccountV3Instruction({
-            metadata: metadataPDA,
-            mint: mintKeypair.publicKey,
-            mintAuthority: mintAuthority.publicKey,
-            payer: payer.publicKey,
-            updateAuthority: mintAuthority.publicKey,
-        }, {
-            createMetadataAccountArgsV3: {
-                data: ON_CHAIN_METADATA,
-                isMutable: true,
-                collectionDetails: null
-            }
-        })
-    );
+    const mintTransaction = await buildTx(createAccountInstrunctions, createInitializeTransferFeeConfigInstructions, createInitializeMintInstructions, createInitializeMetadataPointerInstructions)
     const newTokenTx = await sendAndConfirmTransaction(connection, mintTransaction, [payer, mintKeypair], undefined);
 
-
     return newTokenTx;
+}
+
+async function _createInitializeMetadataPointerInstructions(metadata: PublicKey, mintAuthority: PublicKey): Promise<TransactionInstruction> {
+    const _createInitializeMetadataPointerInstruction = createInitializeMetadataPointerInstruction(metadata, mintAuthority, null, TOKEN_2022_PROGRAM_ID)
+    return _createInitializeMetadataPointerInstruction;
+}
+
+
+async function buildTx(_createAccountInstrunctions: TransactionInstruction, _createInitializeTransferFeeConfigInstructions: TransactionInstruction, _createInitializeMintInstructions: TransactionInstruction, _createInitializeMetadataPointerInstructions: TransactionInstruction): Promise<Transaction> {
+    const mintTransaction = new Transaction().add(
+        _createAccountInstrunctions,
+        _createInitializeTransferFeeConfigInstructions,
+        _createInitializeMintInstructions,
+        //createInitializeMetadataPointerInstructions
+    );
+
+    return mintTransaction;
+}
+
+
+async function _createInitializeTransferFeeConfigInstruction(mint: PublicKey, transferFeeConfigAuthority: PublicKey, withdrawWithheldAuthority: PublicKey, feeBasisPoints: number, maxFee: bigint): Promise<TransactionInstruction> {
+    const createInitializeTransferFeeConfigInstructions = await createInitializeTransferFeeConfigInstruction(
+        mint,
+        transferFeeConfigAuthority,
+        withdrawWithheldAuthority,
+        feeBasisPoints,
+        maxFee,
+        TOKEN_2022_PROGRAM_ID
+    )
+
+    return createInitializeTransferFeeConfigInstructions;
+}
+
+async function _createAccountInstrunctions(payer: Keypair, mint: PublicKey, mintLen: number, mintLamports: number): Promise<TransactionInstruction> {
+    const createAccountInstrunctions = await SystemProgram.createAccount({
+        fromPubkey: payer.publicKey,
+        newAccountPubkey: mint,
+        space: mintLen,
+        lamports: mintLamports,
+        programId: TOKEN_2022_PROGRAM_ID,
+    })
+
+    return createAccountInstrunctions;
 }
 
 // Execute the main function

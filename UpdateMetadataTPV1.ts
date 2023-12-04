@@ -45,7 +45,7 @@ const uploadMetadataForToken = async (offChainMetadata: any) => {
 
     //Constants
     const mplProgramId = new PublicKey("metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s");
-    const mint = new PublicKey("8Lw2vWmtXbHGj6PYEnRXtFwrnjz2sS7CtoRdHGRq9ndA");
+    const mint = new PublicKey("BX2iLD559nN4NgWfPCAcR8LRwgqtJHjgGEZjvFmp6Wki");
     const [metadata] = PublicKey.findProgramAddressSync([
         Buffer.from("metadata"),
         mplProgramId.toBytes(),
