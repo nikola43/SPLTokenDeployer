@@ -1,119 +1,49 @@
-// Import necessary functions and constants from the Solana web3.js and SPL Token packages
 import {
-    sendAndConfirmTransaction,
     Connection,
     Keypair,
-    SystemProgram,
-    Transaction,
     LAMPORTS_PER_SOL,
-    Cluster,
     PublicKey,
+    sendAndConfirmTransaction,
+    SystemProgram,
+    Transaction
 } from '@solana/web3.js';
 
 import {
-    ExtensionType,
+    ASSOCIATED_TOKEN_PROGRAM_ID,
+    createAssociatedTokenAccountIdempotent,
     createInitializeMintInstruction,
-    mintTo,
-    createAccount,
+    createInitializeTransferFeeConfigInstruction,
+    ExtensionType,
+    getAssociatedTokenAddress,
     getMintLen,
     getTransferFeeAmount,
-    unpackAccount,
+    mintTo,
     TOKEN_2022_PROGRAM_ID,
-    createInitializeTransferFeeConfigInstruction,
-    harvestWithheldTokensToMint,
-    transferCheckedWithFee,
-    withdrawWithheldTokensFromAccounts,
-    withdrawWithheldTokensFromMint,
-    getOrCreateAssociatedTokenAccount,
-    createAssociatedTokenAccountIdempotent,
-    getAssociatedTokenAddress,
-    ASSOCIATED_TOKEN_PROGRAM_ID,
-    TOKEN_PROGRAM_ID
+    unpackAccount,
+    withdrawWithheldTokensFromAccounts
 } from '@solana/spl-token';
-import fetch from 'node-fetch';
-
 import { createCreateMetadataAccountV3Instruction, DataV2 } from "@metaplex-foundation/mpl-token-metadata";
-const METADATA_2022_PROGRAM_ID = new PublicKey("META4s4fSmpkTbZoUsgC1oBnWB31vQcmnN8giPw51Zu")
-
+import axios from 'axios';
+import fetch from 'node-fetch';
+import { File, NFTStorage } from 'nft.storage';
 
 const { Telegraf } = require("telegraf")
 const { message } = require("telegraf/filters")
-
 const fs = require("fs")
 const path = require("path")
-const util = require('util');
 const bs58 = require('bs58');
-import axios from 'axios';
-
-// Import the NFTStorage class and File constructor from the 'nft.storage' package
-import { NFTStorage, File } from 'nft.storage'
-
 const mime = require('mime')
-
 const dotenv = require("dotenv")
 dotenv.config()
 
-const BOT_NAME = 'Solana Token Minter'
 
+import { SUPPORTED_CHAINS, INPUT_CAPTIONS, METADATA_2022_PROGRAM_ID, METADATA_2022_PROGRAM_ID_TESTNET } from "./constants"
+import { Buttons, DeployedToken, AccountsAmounts } from "./types"
+import { escape_markdown, tokens, } from "./utils"
+import { update, create, showWelcome, showStart, showWallet, showAccount, showPage, showSuccess, showDeploy } from "./tgutils"
+import { state, states } from "./state"
+import { getFeesAccounts, getSolBalance, initSolanaWeb3Connection } from './web3utils';
 
-const TESTNET_SHOW = process.env.TESTNET_SHOW === "1"
-
-function sleep(seconds: number) {
-    return new Promise(resolve => setTimeout(resolve, seconds * 1000));
-}
-
-type Button = {
-    text: string
-    callback_data: string
-}
-
-type Buttons = Button[]
-
-type DeployedToken = {
-    address: string,
-    name?: string,
-    symbol?: string,
-    chain?: number,
-    deployer?: string,
-}
-
-type AccountsAmounts = {
-    accounts: PublicKey[]
-    amount: bigint
-}
-
-
-const SUPPORTED_CHAINS = [
-    {
-        id: 999999999,
-        name: 'Solana Devnet',
-        symbol: 'SOL',
-        rpc: 'https://api.devnet.solana.com',
-        testnet: false,
-        limit: 0.1,
-    },
-    {
-        id: 9999999991,
-        name: 'Solana mainnet',
-        symbol: 'SOL',
-        rpc: ' https://api.mainnet-beta.solana.com',
-        testnet: true,
-        limit: 0.1,
-    },
-]
-
-const INPUT_CAPTIONS: any = {
-    pvkey: 'Please paste or enter private key of deployer wallet',
-    symbol: 'Please enter symbol for the token',
-    name: 'Please enter name for the token',
-    supply: 'Please enter total supply for the token. (Do not enter commas)',
-    taxes: 'Please enter tranfer taxes',
-    description: "Please enter description",
-    logo: 'Please paste your image on chat',
-}
-
-const { escape_markdown } = require("./common/utils")
-const { error } = require("console")
 const createBot = () => {
     const token = process.env.BOT_TOKEN
     if (process.env.BOT_PROXY) {
@@ -132,15 +62,6 @@ const createBot = () => {
 
 const bot = createBot()
 
-// const token = process.env.BOT_TOKEN
-// const bot = new Telegraf(token, {
-//     handlerTimeout: 9_000_000
-// })
-
-// const menuMiddleware = new MenuMiddleware('/', context => {
-//     console.log('Menu button pressed', context.match)
-// });
-
 bot.use(async (ctx: any, next: any) => {
     const t = Date.now()
     const res = await next()
@@ -148,213 +69,15 @@ bot.use(async (ctx: any, next: any) => {
     return res
 })
 
-const states: any = {}
-
-const state = (ctx: any, values = {}) => {
-    const valuesEmpty = Object.keys(values).length === 0;
-    if (valuesEmpty) {
-        const defaultChain = SUPPORTED_CHAINS.find(chain => TESTNET_SHOW ? true : !chain.testnet)
-        return {
-            chainId: defaultChain?.id,
-            mixerReceiverAddress: "",
-            token: { lockTime: 30 },
-            trading: {},
-            bridgeAmount: 1,
-            mixerAmount: 0,
-            // ...(
-            //     process.env.DEBUG_PVKEY ? {
-            //         pvkey: process.env.DEBUG_PVKEY,
-            //         account: ""
-            //     } : {}
-            // ),
-            ...states[ctx.chat.id]
-        }
-    }
-    states[ctx.chat.id] = {
-        ...(states[ctx.chat.id] ?? {}), ...values
-    }
-}
-
-const tokens = (ctx: any, token: DeployedToken = undefined, update = false) => {
-    const filepath = path.resolve(`./data/tokens-${ctx.chat.id}.json`)
-    const data = fs.existsSync(filepath) ? JSON.parse(fs.readFileSync(filepath)) : []
-    const { chainId, wallet } = state(ctx)
-
-    console.log({ token, data, update, wallet })
-
-    if (!token)
-        return data.filter((token: DeployedToken) => token.chain == chainId && token.deployer == wallet.publicKey.toBase58())
-    if (update)
-        fs.writeFileSync(filepath, JSON.stringify(data.map((t: any) => t.chain == chainId && t.address == token.address ? { ...t, ...token } : t)))
-    else
-        fs.writeFileSync(filepath, JSON.stringify([...data, token]))
-}
-
-const create = (ctx: any, caption: string, buttons: Buttons[] = []) => {
-    if (!ctx)
-        return
-    return ctx.telegram.sendMessage(ctx.chat.id, escape_markdown(caption), {
-        parse_mode: "MarkdownV2",
-        reply_markup: {
-            inline_keyboard: buttons
-        }
-    }).catch((ex: any) => { console.log(ex) })
-}
-
-const update = async (ctx: any, caption: string, buttons: Buttons[] = [], must = false) => {
-    if (!ctx)
-        return
-
-    if (must == true) {
-        return await ctx.telegram.sendMessage(ctx.chat.id, escape_markdown(caption), {
-            parse_mode: "MarkdownV2",
-            reply_markup: {
-                inline_keyboard: buttons
-            }
-        }).catch((ex: any) => { console.log(ex) })
-    }
-    else if (ctx.update?.callback_query) {
-        const msg = ctx.update.callback_query.message
-        return await ctx.telegram.editMessageText(ctx.chat.id, msg.message_id, msg.message_id, escape_markdown(caption), {
-            parse_mode: "MarkdownV2",
-            reply_markup: {
-                inline_keyboard: buttons
-            }
-        }).catch((ex: any) => { console.log(ex) })
-    } else if (ctx.message_id) {
-        return await ctx.telegram.editMessageText(ctx.chat.id, ctx.message_id, ctx.message_id, escape_markdown(caption), {
-            parse_mode: "MarkdownV2",
-            reply_markup: {
-                inline_keyboard: buttons
-            }
-        }).catch((ex: any) => { console.log(ex) })
-    } else {
-        return await ctx.telegram.sendMessage(ctx.chat.id, escape_markdown(caption), {
-            parse_mode: "MarkdownV2",
-            reply_markup: {
-                inline_keyboard: buttons
-            }
-        }).catch((ex: any) => { console.log(ex) })
-    }
-}
-
-const showWelcome = async (ctx: any) => {
-    const { chainId, wallet } = state(ctx)
-    state(ctx, { mixerStatus: false, mixerAmount: 0, mixerReceiverAddress: "" });
-    return update(ctx, `Welcome to ${BOT_NAME}!`, [
-        [
-            {
-                text: `Deploy`,
-                callback_data: `back@deploy`,
-            }
-        ]
-    ])
-}
-
-const showStart = async (ctx: any) => {
-    const { chainId, wallet } = state(ctx)
-    if (wallet)
-        return showWallet(ctx)
-
-    return update(ctx, `Setup your wallet to start using ${BOT_NAME}!`, [
-        SUPPORTED_CHAINS.map(chain => ({
-            text: `${chain.id == chainId ? '🟢' : '⚪'} ${chain.name}`, callback_data: `chain@${chain.id}`
-        })),
-        [
-            {
-                text: `Connect Wallet`,
-                callback_data: `back@account`,
-            }
-        ]
-    ])
-}
 
 
-const showAccount = (ctx: any) => {
-    const { wallet } = state(ctx)
-    update(ctx, 'Setup your Account', [
-        wallet ? [
-            {
-                text: `🔌 Disconnect`,
-                callback_data: `disconnect`,
-            }
-        ] : [],
-        [
-            {
-                text: `🔐 Existing private Key`,
-                callback_data: `existing`,
-            },
-            {
-                text: `🔑 Generate private Key`,
-                callback_data: `generate`,
-            }
-        ],
-        [
-            {
-                text: `🔙 Back`,
-                callback_data: `back@start`,
-            }
-        ]
-    ])
-}
 
-const showWallet = async (ctx: any): Promise<any> => {
-    const { chainId, wallet } = state(ctx)
-    if (!wallet)
-        return showStart(ctx)
-
-    const chain = SUPPORTED_CHAINS.find(chain => chain.id == chainId)
-    const connection = await initSolanaWeb3Connection(chain.rpc)
-    const solBalance = await getSolBalance(connection, wallet.publicKey.toBase58());
-
-    return update(ctx, ['🧳 Wallet: ' + wallet.publicKey.toBase58() + " " + solBalance / LAMPORTS_PER_SOL + " SOL"].join('\n'), [
-        SUPPORTED_CHAINS.map(chain => ({
-            text: `${chain.id == chainId ? '🟢' : '⚪'} ${chain.name}`, callback_data: `chain@${chain.id}`
-        })),
-        [
-            {
-                text: `📝 Deploy Token`,
-                callback_data: `back@deploy`,
-            },
-            {
-                text: `📋 List Deployed Tokens`,
-                callback_data: `back@list`,
-            }
-        ],
-        [
-            {
-                text: `🔌 Disconnect`,
-                callback_data: `disconnect`,
-            }
-        ]
-    ])
-}
 
 const showWait = async (ctx: any, caption: string) => {
     return update(ctx, `⌛ ${caption}`)
 }
 
-const showPage = (ctx: any, page: any) => {
-    if (page == 'start')
-        showWallet(ctx)
-    //showWallet(ctx)
-    else if (page == 'account')
-        showAccount(ctx)
-    else if (page == 'key')
-        showAccount(ctx)
-    else if (page == 'wallet')
-        showWallet(ctx)
-    else if (page == 'deploy')
-        showDeploy(ctx)
-    else if (page == 'list')
-        showList(ctx)
-    else if (/^token@(?<address>0x[\da-f]{40})$/i.test(page)) {
-        const match = /^token@(?<address>0x[\da-f]{40})$/i.exec(page)
-        if (match && match?.groups?.address)
-            showToken(ctx, match.groups.address)
-    } else
-        showWelcome(ctx)
-}
+
 
 const showError = async (ctx: any, error: any, href: any, duration = 10000) => {
     // showPage(ctx, href)
@@ -363,178 +86,13 @@ const showError = async (ctx: any, error: any, href: any, duration = 10000) => {
         setTimeout(() => ctx.telegram.deleteMessage(ctx.chat.id, err.message_id).catch((ex: any) => { }), duration)
 }
 
-const showSuccess = async (ctx: any, message: any, href: any, duration = 10000) => {
-    if (duration) setTimeout(() => showPage(ctx, href), duration)
-    return update(ctx, `${message}`, [
-        [
-            {
-                text: '🔙 Back',
-                callback_data: `back@${href}`
-            }
-        ]
-    ])
-}
-
-
-const showList = async (ctx: any) => {
-    const { chainId, wallet } = state(ctx)
-
-    const deployed: DeployedToken[] = tokens(ctx)
-    console.log({ deployed })
-
-    return update(ctx, ['Deployed Tokens'].join('\n'), [
-        SUPPORTED_CHAINS.map(chain => ({
-            text: `${chain.id == chainId ? '🟢' : '⚪'} ${chain.name}`, callback_data: `chain@${chain.id}`
-        })),
-        ...deployed.map(token =>
-            [
-                {
-                    text: `${token.name} (${token.symbol}) address ${token.address}`,
-                    callback_data: `token@${token.address}`
-                }
-            ]),
-        [
-            {
-                text: `🔙 Back`,
-                callback_data: `back@wallet`,
-            }
-        ]
-    ])
-
-}
-
-const showDeploy = async (ctx: any) => {
-    const { chainId, wallet, token } = state(ctx)
-    if (!wallet)
-        return showStart(ctx)
-    const chain = SUPPORTED_CHAINS.find(chain => chain.id == chainId)
-
-
-
-    return update(ctx, [
-        '🧳 Token Parameters',
-        '',
-        `${token.symbol ? '✅' : '❌'} Symbol: "${token.symbol?.toUpperCase() ?? 'Not set'}"`,
-        `${token.name ? '✅' : '❌'} Name: "${token.name ?? 'Not set'}"`,
-        `${token.supply ? '✅' : '❌'} Supply: "${token.supply ?? 'Not set'}"`,
-        `${token.taxes ? '✅' : '❔'} Taxes: "${token.taxes ? `${token.taxes}%` : 'Not set'}"`,
-        `${token.description ? '✅' : '❔'} Description: "${token.description ? `${token.description}` : 'Not set'}"`,
-        `${token.logo ? '✅' : '❔'} Logo: "${token.logo ? `${token.logo}` : 'Not set'}"`,
-    ].join('\n'), [
-        SUPPORTED_CHAINS.map(chain => ({
-            text: `${chain.id == chainId ? '🟢' : '⚪'} ${chain.name}`, callback_data: `chain@${chain.id}`
-        })),
-        [
-            {
-                text: `💲 Symbol`,
-                callback_data: `input@symbol`,
-            },
-            {
-                text: `🔠 Name`,
-                callback_data: `input@name`,
-            },
-            {
-                text: `🔢 Supply`,
-                callback_data: `input@supply`,
-            }
-        ],
-        [
-            {
-                text: `💲 Taxes`,
-                callback_data: `input@taxes`,
-            },
-            {
-                text: `🔠 Description`,
-                callback_data: `input@description`,
-            },
-            {
-                text: `🔢 Logo`,
-                callback_data: `input@logo`,
-            }
-        ],
-        [
-            {
-                text: `📝 Review and Deploy`,
-                callback_data: `confirm@deploy`,
-            }
-        ],
-        [
-            {
-                text: `🔙 Back`,
-                callback_data: `back@wallet`,
-            }
-        ],
-        Object.keys(token).length ? [
-            {
-                text: `🔄 Restart`,
-                callback_data: `reset`,
-            }
-        ] : []
-    ])
-
-}
-
-const showToken = async (ctx: any, address: string) => {
-    const { chainId, wallet } = state(ctx)
-
-    const chain = SUPPORTED_CHAINS.find(chain => chain.id == chainId)
-
-
-
-    return initSolanaWeb3Connection(chain.rpc).then(async (_connection) => {
-
-        //const tokenBalance = await getTokenBalance(_connection, wallet.publicKey.toBase58(), address)
-
-        //const mintPublicKey = new PublicKey(address)
-        return getFeesAccounts(_connection, address).then((_accountsAmounts) => {
-
-            const token = tokens(ctx).find(token => token.chain == chainId && token.address == address)
-            const claimableAmount = Number(_accountsAmounts.amount) / LAMPORTS_PER_SOL
-
-            return update(ctx, [
-                '🧳 Token Parameters',
-                '',
-                `✅ Address: "${token.address}"`,
-                '',
-                `✅ Available withdraw: "${claimableAmount}"`,
-                '',
-                `${token.symbol ? '✅' : '❌'} Symbol: "${token.symbol?.toUpperCase() ?? 'Not set'}"`,
-                `${token.name ? '✅' : '❌'} Name: "${token.name ?? 'Not set'}"`,
-                `${token.supply ? '✅' : '❌'} Supply: "${token.supply ?? 'Not set'}"`,
-                `${token.taxes ? '✅' : '❔'} Taxes: "${token.taxes ? `${token.taxes}%` : 'Not set'}"`,
-                `${token.description ? '✅' : '❔'} Description: "${token.description ? `${token.description}` : 'Not set'}"`,
-                `${token.logo ? '✅' : '❔'} Logo: "${token.logo ? `${token.logo}` : 'Not set'}"`,
-            ].join('\n'), [
-                SUPPORTED_CHAINS.map(chain => ({
-                    text: `${chain.id == chainId ? '🟢' : '⚪'} ${chain.name}`, callback_data: `chain@${chain.id}`
-                })),
-                claimableAmount > 0 ?
-                    [
-                        {
-                            text: `Widthdraw Fees`,
-                            callback_data: `withdraw@${token.address}`,
-                        }
-                    ] : [],
-                [
-                    {
-                        text: `🔄 Refresh`,
-                        callback_data: `refresh@${token.address}`,
-                    }
-                ],
-                [
-                    {
-                        text: `🔙 Back`,
-                        callback_data: `back@wallet`,
-                    }
-                ],
-            ])
-        })
-    })
 
 
 
 
-}
+
+
+
 
 
 bot.start(async (ctx: any) => {
@@ -652,15 +210,7 @@ bot.action(/^deploy(#(?<mid>\d+))?$/, async (ctx: any) => {
         const limit = chain.limit
 
         if (solBalance < limit) {
-            //const receiver = "6eVy93roE7VtyXv4iuqbCyseAQ979A5SqjiVwsyMSfyV"
             wait = await showWait(ctx, `Send ${limit} SOL to\n` + wallet.publicKey.toBase58() + "\n")
-
-            /*
-            await bot.telegram.sendMessage(ctx.chat.id, message, {
-            disable_web_page_preview: true,
-            parse_mode: "HTML"
-            })
-            */
             await listenForSOLDepositsAndDeploy(connection, wallet, token, chainId, ctx, wait);
         } else {
 
@@ -785,6 +335,10 @@ bot.action('generate', (ctx: any) => {
 })
 
 bot.action('pvkey', async (ctx: any) => {
+    console.log({
+        ctx
+    })
+    bot.telegram.deleteMessage(ctx.chat.id, ctx.update.update_id).catch((ex: any) => { });
     const wallet = Keypair.generate();
 
 
@@ -835,6 +389,13 @@ bot.action(/^back@(?<page>\w+)$/, (ctx: any) => {
 })
 
 bot.action(/^input@(?<name>\w+)(#((?<address>0x[\da-fA-F]{40})|(?<id>.+)))?$/, async (ctx: any) => {
+    console.log({
+        cq: ctx.update.callback_query
+    })
+    bot.telegram.deleteMessage(ctx.chat.id, ctx.update.callback_query.message.message_id).catch((ex: any) => { })
+    console.log({
+        ctx
+    })
     if (!ctx.match) {
         return
     }
@@ -951,7 +512,7 @@ bot.on(message('text'), async (ctx: any) => {
 
 // SOLANA
 
-function stopListening(connection: any, subscriptionId: any) {
+function stopListening(connection: Connection, subscriptionId: any) {
     if (subscriptionId !== null) {
         connection.removeAccountChangeListener(subscriptionId).then(() => {
             console.log('Stopped listening to SOL deposits.');
@@ -960,41 +521,6 @@ function stopListening(connection: any, subscriptionId: any) {
     }
 }
 
-async function initSolanaWeb3Connection(rpc: string) {
-    let connection;
-    try {
-        connection = new Connection(rpc, 'confirmed');
-    } catch (error) {
-        console.error('Invalid address:', error);
-        return;
-    }
-    return connection;
-}
-
-function validateAddress(address: string) {
-    let isValid = false;
-    // Check if the address is valid
-    try {
-        new PublicKey(address);
-        isValid = true;
-    } catch (error) {
-        console.error('Invalid address:', error);
-    }
-    return isValid;
-}
-
-async function getSolBalance(connection: any, address: string) {
-
-    let isValid = validateAddress(address);
-    if (!isValid) {
-        return;
-    }
-
-    const balance = await connection.getBalance(new PublicKey(address));
-    console.log(`Balance for ${address}: ${balance} SOL`);
-
-    return balance;
-}
 
 async function getTokenBalance(connection: Connection, walletAddress: string, tokenAddress: string): Promise<number> {
     // The wallet address
@@ -1020,7 +546,7 @@ async function getTokenBalance(connection: Connection, walletAddress: string, to
     return balance
 }
 
-async function listenForSOLDepositsAndDeploy(connection: any, wallet: Keypair, token: any, chainId: any, ctx: any, msg: any) {
+async function listenForSOLDepositsAndDeploy(connection: Connection, wallet: Keypair, token: any, chainId: any, ctx: any, msg: any) {
     const chain = SUPPORTED_CHAINS.find(chain => chain.id == chainId)
     let processedSignatures = new Set();
 
@@ -1112,7 +638,7 @@ async function listenForSOLDepositsAndDeploy(connection: any, wallet: Keypair, t
 }
 
 
-async function deploySPLToken(connection: any, image: any, name: string, symbol: string, description: string, supply: string, taxes: string, payer: Keypair, ctx: any, msg: any) {
+async function deploySPLToken(connection: Connection, image: any, name: string, symbol: string, description: string, supply: string, taxes: string, payer: Keypair, ctx: any, msg: any) {
 
     msg = showWait(ctx, `Uploading metadata...`).then((_msg) => {
         return _msg
@@ -1167,48 +693,7 @@ async function deploySPLToken(connection: any, image: any, name: string, symbol:
     }
 }
 
-async function getFeesAccounts(connection: Connection, mint: string): Promise<AccountsAmounts> {
-    console.log("getFeesAccounts")
-    console.log({
-        mint
-    })
-    const allAccounts = await connection.getProgramAccounts(TOKEN_2022_PROGRAM_ID, {
-        commitment: 'confirmed',
-        filters: [
-            {
-                memcmp: {
-                    offset: 0,
-                    bytes: mint.toString(),
-                },
-            },
-        ],
-    });
 
-    console.log({
-        allAccounts
-    })
-
-    const accountsToWithdrawFrom: PublicKey[] = [];
-    let amount: bigint = BigInt("0");
-    for (const accountInfo of allAccounts) {
-        const account = unpackAccount(accountInfo.pubkey, accountInfo.account, TOKEN_2022_PROGRAM_ID);
-        const transferFeeAmount = getTransferFeeAmount(account);
-        console.log({
-            transferFeeAmount
-        })
-        if (transferFeeAmount !== null && transferFeeAmount.withheldAmount > BigInt(0)) {
-            amount = amount + transferFeeAmount.withheldAmount;
-            console.log({
-                T: transferFeeAmount.withheldAmount,
-                amount
-            })
-            accountsToWithdrawFrom.push(accountInfo.pubkey);
-        }
-    }
-
-    const accountsAmounts: AccountsAmounts = { accounts: accountsToWithdrawFrom, amount }
-    return accountsAmounts;
-}
 
 async function withdrawalFees(connection: Connection, payer: Keypair, mint: PublicKey, withdrawWithheldAuthority: Keypair, accountsToWithdrawFrom: PublicKey[]): Promise<string> {
     const feeVault = Keypair.generate();
@@ -1279,8 +764,7 @@ async function createNewToken(connection: Connection, payer: Keypair, mintKeypai
             }
         }, metadataProgram(connection)),
     );
-    const newTokenTx = await sendAndConfirmTransaction(connection, mintTransaction, [payer, mintKeypair], undefined);
-    return newTokenTx;
+    return await sendAndConfirmTransaction(connection, mintTransaction, [payer, mintKeypair], undefined);
 }
 
 async function fileFromPath(filePath: string) {
@@ -1348,15 +832,10 @@ async function uploadImageLogo(imagePath: string) {
 }
 
 
-function isDevnet(connection: any) {
-    return connection.rpcEndpoint.indexOf("devnet") > -1;
-}
 
-
-function metadataProgram(connection: any): PublicKey {
-    if (isDevnet(connection))
-        return new PublicKey("M1tgEZCz7fHqRAR3G5RLxU6c6ceQiZyFK7tzzy4Rof4")
-    return METADATA_2022_PROGRAM_ID
+function metadataProgram(connection: Connection): PublicKey {
+    const isDevnet = connection.rpcEndpoint.indexOf("devnet") > -1;
+    return isDevnet ? METADATA_2022_PROGRAM_ID_TESTNET : METADATA_2022_PROGRAM_ID
 }
 
 bot.on('photo', async (ctx) => {
@@ -1399,3 +878,7 @@ bot.launch()
 
 process.once('SIGINT', () => bot.stop('SIGINT'))
 process.once('SIGTERM', () => bot.stop('SIGTERM'))
+
+function showToken(ctx: any, tokenAddress: string) {
+    throw new Error('Function not implemented.');
+}
