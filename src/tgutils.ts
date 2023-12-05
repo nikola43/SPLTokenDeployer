@@ -186,7 +186,7 @@ export const showDeploy = async (ctx: any) => {
                 callback_data: `input@description`,
             },
             {
-                text: `🔢 Logo`,
+                text: `🌅 Logo`,
                 callback_data: `input@logo`,
             }
         ],
@@ -243,7 +243,7 @@ export const showSuccess = async (ctx: any, message: any, href: any, duration = 
     return update(ctx, `${message}`, [
         [
             {
-                text: '🔙 Back',
+                text: 'Continue ➡️',
                 callback_data: `back@${href}`
             }
         ]
@@ -337,5 +337,6 @@ export const showPage = (ctx: any, page: any) => {
         if (match && match?.groups?.address)
             showToken(ctx, match.groups.address)
     } else
-        showWelcome(ctx)
+        showDeploy(ctx)
+    //showWelcome(ctx)
 }

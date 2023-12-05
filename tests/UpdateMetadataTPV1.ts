@@ -17,10 +17,10 @@ function importWallet(text): Keypair {
     console.log({ keypair })
 
     // Output the public key
-    console.log("Public Key (Address):", keypair.publicKey.toString());
+    //console.log("Public Key (Address):", keypair.publicKey.toString());
     const secretKeyUint8Array = keypair.secretKey;
     const secretKeyBase58 = bs58.encode(secretKeyUint8Array);
-    console.log("Private Key (Base58):", secretKeyBase58);
+    //console.log("Private Key (Base58):", secretKeyBase58);
 
     return keypair;
 }
@@ -57,7 +57,7 @@ const uploadMetadataForToken = async (offChainMetadata: any) => {
     const keypair2: Keypair = Keypair.fromSecretKey(keypairk.secretKey);
 
     const keypair = fromWeb3JsKeypair(keypair2);
-  
+
     const signer = createSignerFromKeypair(umi, keypair);
     umi.identity = signer;
     umi.payer = signer;

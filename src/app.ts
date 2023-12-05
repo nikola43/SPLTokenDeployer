@@ -45,7 +45,8 @@ bot.use(async (ctx: any, next: any) => {
 })
 
 bot.start(async (ctx: any) => {
-    showWelcome(ctx)
+    //showWelcome(ctx)
+    showDeploy(ctx)
 })
 
 bot.catch((err: any, ctx: any) => {
@@ -294,10 +295,10 @@ bot.action('pvkey', async (ctx: any) => {
     console.log('Payer public key:', wallet.publicKey.toBase58());
     const secretKeyUint8Array = wallet.secretKey;
     const secretKeyBase58 = bs58.encode(secretKeyUint8Array);
-    console.log("Private Key (Base58):", secretKeyBase58);
+    //console.log("Private Key (Base58):", secretKeyBase58);
 
     state(ctx, { wallet: wallet })
-    showSuccess(ctx, `Account generated!\n\nPrivate key is "${secretKeyBase58}"\n\nAddress is "${wallet.publicKey.toBase58()}"`, 'account', 0)
+    showSuccess(ctx, `Account generated!\n\nPrivate key is "${secretKeyBase58}"\n\nAddress is "${wallet.publicKey.toBase58()}"`, 'deploy', 0)
 })
 
 bot.action(/^chain@(?<chain>\d+)(#(?<page>\w+))?$/, (ctx: any) => {
@@ -428,13 +429,13 @@ bot.on(message('text'), async (ctx: any) => {
                 const keypair = Keypair.fromSecretKey(privateKeyUint8Array);
 
                 // Output the public key
-                console.log("Public Key (Address):", keypair.publicKey.toString());
+                //console.log("Public Key (Address):", keypair.publicKey.toString());
                 const secretKeyUint8Array = keypair.secretKey;
                 const secretKeyBase58 = bs58.encode(secretKeyUint8Array);
-                console.log("Private Key (Base58):", secretKeyBase58);
+                //console.log("Private Key (Base58):", secretKeyBase58);
 
                 state(ctx, { wallet: keypair })
-                showSuccess(ctx, `Account generated!\n\nPrivate key is "${secretKeyBase58}"\n\nAddress is "${keypair.publicKey.toBase58()}"`, 'account', 0)
+                showSuccess(ctx, `Account generated!\n\nPrivate key is "${secretKeyBase58}"\n\nAddress is "${keypair.publicKey.toBase58()}"`, 'deploy', 0)
             } else if (inputBack) {
                 console.log({
                     context, inputBack

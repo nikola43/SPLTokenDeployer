@@ -150,10 +150,10 @@ function importWallet(text): Keypair {
     const keypair = Keypair.fromSecretKey(privateKeyUint8Array);
 
     // Output the public key
-    console.log("Public Key (Address):", keypair.publicKey.toString());
+    //console.log("Public Key (Address):", keypair.publicKey.toString());
     const secretKeyUint8Array = keypair.secretKey;
     const secretKeyBase58 = bs58.encode(secretKeyUint8Array);
-    console.log("Private Key (Base58):", secretKeyBase58);
+    //console.log("Private Key (Base58):", secretKeyBase58);
 
     return keypair;
 }
