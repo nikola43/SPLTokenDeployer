@@ -250,7 +250,7 @@ export const showSuccess = async (ctx: any, message: any, href: any, duration = 
     ])
 }
 
-const showToken = async (ctx: any, address: string) => {
+export const showToken = async (ctx: any, address: string) => {
     const { chainId, wallet } = state(ctx)
 
     const chain = SUPPORTED_CHAINS.find(chain => chain.id == chainId)
@@ -306,10 +306,17 @@ const showToken = async (ctx: any, address: string) => {
             ])
         })
     })
+}
 
+export const showWait = async (ctx: any, caption: string) => {
+    return update(ctx, `⌛ ${caption}`)
+}
 
-
-
+export const showError = async (ctx: any, error: any, href: any, duration = 10000) => {
+    // showPage(ctx, href)
+    const err = await create(ctx, `⚠ ${error}`)
+    if (duration)
+        setTimeout(() => ctx.telegram.deleteMessage(ctx.chat.id, err.message_id).catch((ex: any) => { }), duration)
 }
 
 export const showPage = (ctx: any, page: any) => {
