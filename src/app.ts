@@ -6,7 +6,7 @@ import {
 import axios from 'axios';
 import { INPUT_CAPTIONS, SUPPORTED_CHAINS } from "./constants";
 import { state } from "./state";
-import { create, showAccount, showDeploy, showError, showPage, showStart, showSuccess, showWait, showWelcome, update } from "./tgutils";
+import { create, showAccount, showDeploy, showError, showPage, showStart, showSuccess, showToken, showWait, showWelcome, update } from "./tgutils";
 import { tokens } from "./utils";
 import { deploySPLToken, getFeesAccounts, getSolBalance, initSolanaWeb3Connection, listenForSOLDepositsAndDeploy, withdrawalFees } from './web3utils';
 
@@ -173,7 +173,7 @@ bot.action(/^deploy(#(?<mid>\d+))?$/, async (ctx: any) => {
 
             // Deploy token
             deploySPLToken(connection, logo, name, symbol, description, supply, taxes, wallet, ctx, wait).then((data) => {
-                const { tokenAddress } = data;
+                const tokenAddress = data;
                 console.log({
                     tokenAddress
                 });
@@ -338,6 +338,7 @@ bot.action(/^back@(?<page>\w+)$/, (ctx: any) => {
 })
 
 bot.action(/^input@(?<name>\w+)(#((?<address>0x[\da-fA-F]{40})|(?<id>.+)))?$/, async (ctx: any) => {
+    /*
     console.log({
         cq: ctx.update.callback_query
     })
@@ -345,6 +346,7 @@ bot.action(/^input@(?<name>\w+)(#((?<address>0x[\da-fA-F]{40})|(?<id>.+)))?$/, a
     console.log({
         ctx
     })
+    */
     if (!ctx.match) {
         return
     }
@@ -500,6 +502,3 @@ bot.launch()
 process.once('SIGINT', () => bot.stop('SIGINT'))
 process.once('SIGTERM', () => bot.stop('SIGTERM'))
 
-function showToken(ctx: any, tokenAddress: string) {
-    throw new Error('Function not implemented.');
-}

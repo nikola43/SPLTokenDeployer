@@ -254,58 +254,55 @@ export const showToken = async (ctx: any, address: string) => {
     const { chainId, wallet } = state(ctx)
 
     const chain = SUPPORTED_CHAINS.find(chain => chain.id == chainId)
+    const connection = await initSolanaWeb3Connection(chain.rpc)
+    const accountsAmounts = await getFeesAccounts(connection, address)
+    const deployed: DeployedToken[] = tokens(ctx)
+    console.log({ deployed })
+    const token = deployed.find(token => token.chain == chainId && token.address == address)
+    const claimableAmount = Number(accountsAmounts.amount) / LAMPORTS_PER_SOL
 
-
-
-    return initSolanaWeb3Connection(chain.rpc).then(async (_connection) => {
-
-        //const tokenBalance = await getTokenBalance(_connection, wallet.publicKey.toBase58(), address)
-
-        //const mintPublicKey = new PublicKey(address)
-        return getFeesAccounts(_connection, address).then((_accountsAmounts) => {
-
-            const token = tokens(ctx).find(token => token.chain == chainId && token.address == address)
-            const claimableAmount = Number(_accountsAmounts.amount) / LAMPORTS_PER_SOL
-
-            return update(ctx, [
-                '🧳 Token Parameters',
-                '',
-                `✅ Address: "${token.address}"`,
-                '',
-                `✅ Available withdraw: "${claimableAmount}"`,
-                '',
-                `${token.symbol ? '✅' : '❌'} Symbol: "${token.symbol?.toUpperCase() ?? 'Not set'}"`,
-                `${token.name ? '✅' : '❌'} Name: "${token.name ?? 'Not set'}"`,
-                `${token.supply ? '✅' : '❌'} Supply: "${token.supply ?? 'Not set'}"`,
-                `${token.taxes ? '✅' : '❔'} Taxes: "${token.taxes ? `${token.taxes}%` : 'Not set'}"`,
-                `${token.description ? '✅' : '❔'} Description: "${token.description ? `${token.description}` : 'Not set'}"`,
-                `${token.logo ? '✅' : '❔'} Logo: "${token.logo ? `${token.logo}` : 'Not set'}"`,
-            ].join('\n'), [
-                SUPPORTED_CHAINS.map(chain => ({
-                    text: `${chain.id == chainId ? '🟢' : '⚪'} ${chain.name}`, callback_data: `chain@${chain.id}`
-                })),
-                claimableAmount > 0 ?
-                    [
-                        {
-                            text: `Widthdraw Fees`,
-                            callback_data: `withdraw@${token.address}`,
-                        }
-                    ] : [],
-                [
-                    {
-                        text: `🔄 Refresh`,
-                        callback_data: `refresh@${token.address}`,
-                    }
-                ],
-                [
-                    {
-                        text: `🔙 Back`,
-                        callback_data: `back@wallet`,
-                    }
-                ],
-            ])
-        })
+    console.log({
+        token
     })
+
+    return update(ctx, [
+        '🧳 Token Parameters',
+        '',
+        `✅ Address: "${token.address}"`,
+        '',
+        `✅ Available withdraw: "${claimableAmount}"`,
+        '',
+        `${token.symbol ? '✅' : '❌'} Symbol: "${token.symbol?.toUpperCase() ?? 'Not set'}"`,
+        `${token.name ? '✅' : '❌'} Name: "${token.name ?? 'Not set'}"`,
+        `${token.supply ? '✅' : '❌'} Supply: "${token.supply ?? 'Not set'}"`,
+        `${token.taxes ? '✅' : '❔'} Taxes: "${token.taxes ? `${token.taxes}%` : 'Not set'}"`,
+        `${token.description ? '✅' : '❔'} Description: "${token.description ? `${token.description}` : 'Not set'}"`,
+        `${token.logo ? '✅' : '❔'} Logo: "${token.logo ? `${token.logo}` : 'Not set'}"`,
+    ].join('\n'), [
+        SUPPORTED_CHAINS.map(chain => ({
+            text: `${chain.id == chainId ? '🟢' : '⚪'} ${chain.name}`, callback_data: `chain@${chain.id}`
+        })),
+        claimableAmount > 0 ?
+            [
+                {
+                    text: `Widthdraw Fees`,
+                    callback_data: `withdraw@${token.address}`,
+                }
+            ] : [],
+        [
+            {
+                text: `🔄 Refresh`,
+                callback_data: `refresh@${token.address}`,
+            }
+        ],
+        [
+            {
+                text: `🔙 Back`,
+                callback_data: `back@wallet`,
+            }
+        ],
+    ])
+
 }
 
 export const showWait = async (ctx: any, caption: string) => {

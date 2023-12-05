@@ -13,6 +13,10 @@ export type DeployedToken = {
     symbol?: string,
     chain?: number,
     deployer?: string,
+    supply?: number,
+    description?: string,
+    taxes?: number,
+    logo?: string
 }
 
 export type AccountsAmount = {

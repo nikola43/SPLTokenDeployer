@@ -6,7 +6,7 @@ import { fileFromPath, tokens } from "./utils";
 import { NFTStorage } from 'nft.storage';
 import { METADATA_2022_PROGRAM_ID, METADATA_2022_PROGRAM_ID_TESTNET, SUPPORTED_CHAINS } from "./constants";
 import { DataV2, createCreateMetadataAccountV3Instruction } from "@metaplex-foundation/mpl-token-metadata";
-
+import fetch from 'node-fetch';
 const fs = require("fs")
 
 function validateAddress(address: string) {
@@ -187,12 +187,10 @@ function metadataProgram(connection: Connection): PublicKey {
     return isDevnet ? METADATA_2022_PROGRAM_ID_TESTNET : METADATA_2022_PROGRAM_ID
 }
 
-export async function deploySPLToken(connection: Connection, image: any, name: string, symbol: string, description: string, supply: string, taxes: string, payer: Keypair, ctx: any, msg: any) {
+export async function deploySPLToken(connection: Connection, image: any, name: string, symbol: string, description: string, supply: string, taxes: string, payer: Keypair, ctx: any, msg: any): Promise<string> {
     let mintKeypair: Keypair;
     try {
-        msg = showWait(ctx, `Uploading metadata...`).then((_msg) => {
-            return _msg
-        })
+        msg = await showWait(ctx, `Uploading metadata...`)
 
         const decimals = 9;
         const feeBasisPoints = Number(taxes) * 100; // 1%
@@ -213,9 +211,7 @@ export async function deploySPLToken(connection: Connection, image: any, name: s
 
         // Step 2 - Create a New Token
 
-        msg = showWait(ctx, `Deploying....`).then((_msg) => {
-            return _msg
-        })
+        msg = await showWait(ctx, `Deploying....`)
 
         const newTokenTx = await createNewToken(connection, payer, mintKeypair, mintKeypair.publicKey, decimals, mintAuthority, transferFeeConfigAuthority, withdrawWithheldAuthority, feeBasisPoints, maxFee, image, name, symbol, description, uri);
         //console.log("New Token Created:", generateExplorerTxUrl(newTokenTx));
@@ -232,12 +228,13 @@ export async function deploySPLToken(connection: Connection, image: any, name: s
         ctx.telegram.deleteMessage(ctx.chat.id, msg.message_id).catch((ex: any) => { })
         //ctx.telegram.deleteMessage(ctx.chat.id, ctx.message.message_id).catch((ex: any) => { })
 
+        return mintKeypair.publicKey.toBase58()
+
     } catch (ex) {
         console.log(ex)
     }
-    return {
-        tokenAddress: mintKeypair.publicKey.toBase58()
-    }
+    return mintKeypair.publicKey.toBase58()
+
 }
 
 
@@ -384,14 +381,14 @@ export async function listenForSOLDepositsAndDeploy(connection: Connection, wall
 
                                         // Deploy token
                                         deploySPLToken(connection, logo, name, symbol, description, supply, taxes, wallet, ctx, msg).then((data) => {
-                                            const { tokenAddress } = data;
+                                            const tokenAddress = data;
                                             console.log({
                                                 tokenAddress
                                             });
                                             token.address = tokenAddress
                                             token.lockTime = undefined
 
-                                            tokens(ctx, { ...token, address: tokenAddress, chain: chainId, deployer: sender })
+                                            tokens(ctx, { ...token, address: tokenAddress, chain: chainId, deployer: receiver })
                                             //state(ctx, { token: {} })
 
                                             ctx.telegram.deleteMessage(ctx.chat.id, msg.message_id).catch((ex: any) => { })

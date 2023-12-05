@@ -3,9 +3,10 @@ import { DeployedToken } from "./types"
 const fs = require("fs")
 const path = require("path")
 const mime = require('mime')
+import { File } from 'nft.storage';
 
 export const escape_markdown = (text) => {
-    return text.replace(/([\.\+\-\|\(\)\#\_\[\]\~\=\{\}\,\!\`\>\<])/g, "\\$1").replaceAll('"','`')
+    return text.replace(/([\.\+\-\|\(\)\#\_\[\]\~\=\{\}\,\!\`\>\<])/g, "\\$1").replaceAll('"', '`')
 }
 
 export const tokens = (ctx: any, token: DeployedToken = undefined, update = false) => {
