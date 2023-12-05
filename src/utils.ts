@@ -12,9 +12,6 @@ export const tokens = (ctx: any, token: DeployedToken = undefined, update = fals
     const filepath = path.resolve(`./data/tokens-${ctx.chat.id}.json`)
     const data = fs.existsSync(filepath) ? JSON.parse(fs.readFileSync(filepath)) : []
     const { chainId, wallet } = state(ctx)
-
-    console.log({ token, data, update, wallet })
-
     if (!token)
         return data.filter((token: DeployedToken) => token.chain == chainId && token.deployer == wallet.publicKey.toBase58())
     if (update)

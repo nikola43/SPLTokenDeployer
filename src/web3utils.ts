@@ -1,6 +1,6 @@
 import { ExtensionType, TOKEN_2022_PROGRAM_ID, createAssociatedTokenAccountIdempotent, createInitializeMintInstruction, createInitializeTransferFeeConfigInstruction, getAssociatedTokenAddress, getMintLen, getTransferFeeAmount, mintTo, unpackAccount, withdrawWithheldTokensFromAccounts } from "@solana/spl-token";
 import { Connection, Keypair, LAMPORTS_PER_SOL, PublicKey, SystemProgram, Transaction, sendAndConfirmTransaction } from "@solana/web3.js";
-import { AccountsAmounts } from "./types";
+import { AccountsAmount } from "./types";
 import { showToken, showWait } from "./tgutils";
 import { fileFromPath, tokens } from "./utils";
 import { File, NFTStorage } from 'nft.storage';
@@ -47,7 +47,7 @@ export async function getSolBalance(connection: Connection, address: string) {
     return balance;
 }
 
-export async function getFeesAccounts(connection: Connection, mint: string): Promise<AccountsAmounts> {
+export async function getFeesAccounts(connection: Connection, mint: string): Promise<AccountsAmount> {
     console.log("getFeesAccounts")
     console.log({
         mint
@@ -85,9 +85,7 @@ export async function getFeesAccounts(connection: Connection, mint: string): Pro
             accountsToWithdrawFrom.push(accountInfo.pubkey);
         }
     }
-
-    const accountsAmounts: AccountsAmounts = { accounts: accountsToWithdrawFrom, amount }
-    return accountsAmounts;
+    return { accounts: accountsToWithdrawFrom, amount };
 }
 
 export function stopListening(connection: Connection, subscriptionId: any) {

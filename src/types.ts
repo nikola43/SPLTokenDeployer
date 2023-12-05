@@ -15,7 +15,7 @@ export type DeployedToken = {
     deployer?: string,
 }
 
-export type AccountsAmounts = {
+export type AccountsAmount = {
     accounts: PublicKey[]
     amount: bigint
 }

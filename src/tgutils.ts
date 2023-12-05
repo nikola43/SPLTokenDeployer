@@ -322,7 +322,6 @@ export const showError = async (ctx: any, error: any, href: any, duration = 1000
 export const showPage = (ctx: any, page: any) => {
     if (page == 'start')
         showWallet(ctx)
-    //showWallet(ctx)
     else if (page == 'account')
         showAccount(ctx)
     else if (page == 'key')
