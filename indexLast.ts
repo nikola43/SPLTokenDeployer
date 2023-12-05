@@ -258,16 +258,6 @@ async function createNewToken(connection: Connection, payer: Keypair, mintKeypai
         ExtensionType.TransferFeeConfig,
     ];
 
-
-    /*
-    const metadata = {
-        name: "Just a Test Token",
-        symbol: "TEST",
-        uri: "https://5vfxc4tr6xoy23qefqbj4qx2adzkzapneebanhcalf7myvn5gzja.arweave.net/7UtxcnH13Y1uBCwCnkL6APKsge0hAgacQFl-zFW9NlI",
-        decimals: 9,
-    };
-    */
-
     //Create token metadata
     const [metadataPDA] = PublicKey.findProgramAddressSync([Buffer.from("metadata"), metadataProgram().toBuffer(), mint.toBuffer()], metadataProgram())
 

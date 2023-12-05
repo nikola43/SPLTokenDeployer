@@ -1,1 +1,11 @@
-[{"symbol":"aaa","name":"gg","supply":10000,"taxes":10,"address":"DRkCBEh2jUi5XmLJK3GZE8uF2dMH3ZUoNVBeBpNqXezA","chain":999999999,"deployer":"B4s4rHrjWDTxVDZv7s9SZcstuYvRT2dtLnicAkfkHds1"}]
+[
+    {
+        "symbol": "TT",
+        "name": "TestT",
+        "supply": 1000000,
+        "taxes": 10,
+        "address": "3fRd4Gg4S8A1q7Q4X8ge1tdAtbuLsdWHGSia1hGBPAXb",
+        "chain": 999999999,
+        "deployer": "ATF1hba6HgznKggrGYch8VqYHXS4McWeLJncHc2aBhr1"
+    }
+]

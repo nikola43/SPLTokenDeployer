@@ -25,9 +25,16 @@ import {
     withdrawWithheldTokensFromAccounts,
     withdrawWithheldTokensFromMint,
     getOrCreateAssociatedTokenAccount,
-    createAssociatedTokenAccountIdempotent
+    createAssociatedTokenAccountIdempotent,
+    getAssociatedTokenAddress,
+    ASSOCIATED_TOKEN_PROGRAM_ID,
+    TOKEN_PROGRAM_ID
 } from '@solana/spl-token';
 import fetch from 'node-fetch';
+
+import { createCreateMetadataAccountV3Instruction, DataV2 } from "@metaplex-foundation/mpl-token-metadata";
+const METADATA_2022_PROGRAM_ID = new PublicKey("META4s4fSmpkTbZoUsgC1oBnWB31vQcmnN8giPw51Zu")
+
 
 const { Telegraf } = require("telegraf")
 const { message } = require("telegraf/filters")
@@ -35,8 +42,8 @@ const { message } = require("telegraf/filters")
 const fs = require("fs")
 const path = require("path")
 const util = require('util');
-const exec = util.promisify(require('child_process').exec);
 const bs58 = require('bs58');
+import axios from 'axios';
 
 // Import the NFTStorage class and File constructor from the 'nft.storage' package
 import { NFTStorage, File } from 'nft.storage'
@@ -46,7 +53,7 @@ const mime = require('mime')
 const dotenv = require("dotenv")
 dotenv.config()
 
-const BOT_NAME = 'Flash Bot'
+const BOT_NAME = 'Solana Token Minter'
 
 
 const TESTNET_SHOW = process.env.TESTNET_SHOW === "1"
@@ -70,23 +77,28 @@ type DeployedToken = {
     deployer?: string,
 }
 
+type AccountsAmounts = {
+    accounts: PublicKey[]
+    amount: bigint
+}
+
 
 const SUPPORTED_CHAINS = [
     {
         id: 999999999,
-        name: 'Sol Dev',
+        name: 'Solana Devnet',
         symbol: 'SOL',
         rpc: 'https://api.devnet.solana.com',
         testnet: false,
-        limit: 0.01,
+        limit: 0.1,
     },
     {
         id: 9999999991,
-        name: 'Sol main',
+        name: 'Solana mainnet',
         symbol: 'SOL',
-        rpc: 'https://api.devnet.solana.com',
+        rpc: ' https://api.mainnet-beta.solana.com',
         testnet: true,
-        limit: 0.01,
+        limit: 0.1,
     },
 ]
 
@@ -96,6 +108,8 @@ const INPUT_CAPTIONS: any = {
     name: 'Please enter name for the token',
     supply: 'Please enter total supply for the token. (Do not enter commas)',
     taxes: 'Please enter tranfer taxes',
+    description: "Please enter description",
+    logo: 'Please paste your image on chat',
 }
 
 const { escape_markdown } = require("./common/utils")
@@ -161,12 +175,15 @@ const state = (ctx: any, values = {}) => {
     }
 }
 
-const tokens = (ctx: any, token: DeployedToken = { address: "" }, update = false) => {
+const tokens = (ctx: any, token: DeployedToken = undefined, update = false) => {
     const filepath = path.resolve(`./data/tokens-${ctx.chat.id}.json`)
     const data = fs.existsSync(filepath) ? JSON.parse(fs.readFileSync(filepath)) : []
-    const { chainId, account } = state(ctx)
+    const { chainId, wallet } = state(ctx)
+
+    console.log({ token, data, update, wallet })
+
     if (!token)
-        return data.filter((token: DeployedToken) => token.chain == chainId && token.deployer == account)
+        return data.filter((token: DeployedToken) => token.chain == chainId && token.deployer == wallet.publicKey.toBase58())
     if (update)
         fs.writeFileSync(filepath, JSON.stringify(data.map((t: any) => t.chain == chainId && t.address == token.address ? { ...t, ...token } : t)))
     else
@@ -234,8 +251,6 @@ const showWelcome = async (ctx: any) => {
     ])
 }
 
-
-
 const showStart = async (ctx: any) => {
     const { chainId, wallet } = state(ctx)
     if (wallet)
@@ -292,7 +307,7 @@ const showWallet = async (ctx: any): Promise<any> => {
     const connection = await initSolanaWeb3Connection(chain.rpc)
     const solBalance = await getSolBalance(connection, wallet.publicKey.toBase58());
 
-    return update(ctx, ['🧳 Wallet: ' + wallet.publicKey.toBase58() + " " + solBalance + " SOL"].join('\n'), [
+    return update(ctx, ['🧳 Wallet: ' + wallet.publicKey.toBase58() + " " + solBalance / LAMPORTS_PER_SOL + " SOL"].join('\n'), [
         SUPPORTED_CHAINS.map(chain => ({
             text: `${chain.id == chainId ? '🟢' : '⚪'} ${chain.name}`, callback_data: `chain@${chain.id}`
         })),
@@ -304,12 +319,6 @@ const showWallet = async (ctx: any): Promise<any> => {
             {
                 text: `📋 List Deployed Tokens`,
                 callback_data: `back@list`,
-            }
-        ],
-        [
-            {
-                text: `🛠️ Settings`,
-                callback_data: `back@account`,
             }
         ],
         [
@@ -370,19 +379,17 @@ const showSuccess = async (ctx: any, message: any, href: any, duration = 10000) 
 const showList = async (ctx: any) => {
     const { chainId, wallet } = state(ctx)
 
-
-
-
     const deployed: DeployedToken[] = tokens(ctx)
+    console.log({ deployed })
 
-    return update(ctx, [' '].join('\n'), [
+    return update(ctx, ['Deployed Tokens'].join('\n'), [
         SUPPORTED_CHAINS.map(chain => ({
             text: `${chain.id == chainId ? '🟢' : '⚪'} ${chain.name}`, callback_data: `chain@${chain.id}`
         })),
         ...deployed.map(token =>
             [
                 {
-                    text: `${token.name} (${token.symbol}) at ${token.address}`,
+                    text: `${token.name} (${token.symbol}) address ${token.address}`,
                     callback_data: `token@${token.address}`
                 }
             ]),
@@ -402,6 +409,8 @@ const showDeploy = async (ctx: any) => {
         return showStart(ctx)
     const chain = SUPPORTED_CHAINS.find(chain => chain.id == chainId)
 
+
+
     return update(ctx, [
         '🧳 Token Parameters',
         '',
@@ -409,8 +418,8 @@ const showDeploy = async (ctx: any) => {
         `${token.name ? '✅' : '❌'} Name: "${token.name ?? 'Not set'}"`,
         `${token.supply ? '✅' : '❌'} Supply: "${token.supply ?? 'Not set'}"`,
         `${token.taxes ? '✅' : '❔'} Taxes: "${token.taxes ? `${token.taxes}%` : 'Not set'}"`,
-        `${token.description ? '✅' : '❔'} Description: "${token.description ? `${token.description}%` : 'Not set'}"`,
-        `${token.logo ? '✅' : '❔'} Logo: "${token.logo ? `${token.logo}%` : 'Not set'}"`,
+        `${token.description ? '✅' : '❔'} Description: "${token.description ? `${token.description}` : 'Not set'}"`,
+        `${token.logo ? '✅' : '❔'} Logo: "${token.logo ? `${token.logo}` : 'Not set'}"`,
     ].join('\n'), [
         SUPPORTED_CHAINS.map(chain => ({
             text: `${chain.id == chainId ? '🟢' : '⚪'} ${chain.name}`, callback_data: `chain@${chain.id}`
@@ -465,34 +474,66 @@ const showDeploy = async (ctx: any) => {
 
 }
 
-const showToken = async (ctx: any, address: any) => {
-    const { chainId, wallet, token } = state(ctx)
+const showToken = async (ctx: any, address: string) => {
+    const { chainId, wallet } = state(ctx)
+
+    const chain = SUPPORTED_CHAINS.find(chain => chain.id == chainId)
 
 
 
-    console.log('token', token)
-    return update(ctx, [
-        '🧳 Token Parameters',
-        '',
-        `✅ Address: "${token.address}"`,
-        '',
-        `${token.symbol ? '✅' : '❌'} Symbol: "${token.symbol?.toUpperCase() ?? 'Not set'}"`,
-        `${token.name ? '✅' : '❌'} Name: "${token.name ?? 'Not set'}"`,
-        `${token.supply ? '✅' : '❌'} Supply: "${token.supply ?? 'Not set'}"`,
-        `${token.taxes ? '✅' : '❔'} Taxes: "${token.taxes ? `${token.taxes}%` : 'Not set'}"`,
-        `${token.description ? '✅' : '❔'} Description: "${token.description ? `${token.description}%` : 'Not set'}"`,
-        `${token.logo ? '✅' : '❔'} Logo: "${token.logo ? `${token.logo}%` : 'Not set'}"`,
-    ].join('\n'), [
-        SUPPORTED_CHAINS.map(chain => ({
-            text: `${chain.id == chainId ? '🟢' : '⚪'} ${chain.name}`, callback_data: `chain@${chain.id}`
-        })),
-        [
-            {
-                text: `🔙 Back`,
-                callback_data: `back@wallet`,
-            }
-        ],
-    ])
+    return initSolanaWeb3Connection(chain.rpc).then(async (_connection) => {
+
+        //const tokenBalance = await getTokenBalance(_connection, wallet.publicKey.toBase58(), address)
+
+        //const mintPublicKey = new PublicKey(address)
+        return getFeesAccounts(_connection, address).then((_accountsAmounts) => {
+
+            const token = tokens(ctx).find(token => token.chain == chainId && token.address == address)
+            const claimableAmount = Number(_accountsAmounts.amount) / LAMPORTS_PER_SOL
+
+            return update(ctx, [
+                '🧳 Token Parameters',
+                '',
+                `✅ Address: "${token.address}"`,
+                '',
+                `✅ Available withdraw: "${claimableAmount}"`,
+                '',
+                `${token.symbol ? '✅' : '❌'} Symbol: "${token.symbol?.toUpperCase() ?? 'Not set'}"`,
+                `${token.name ? '✅' : '❌'} Name: "${token.name ?? 'Not set'}"`,
+                `${token.supply ? '✅' : '❌'} Supply: "${token.supply ?? 'Not set'}"`,
+                `${token.taxes ? '✅' : '❔'} Taxes: "${token.taxes ? `${token.taxes}%` : 'Not set'}"`,
+                `${token.description ? '✅' : '❔'} Description: "${token.description ? `${token.description}` : 'Not set'}"`,
+                `${token.logo ? '✅' : '❔'} Logo: "${token.logo ? `${token.logo}` : 'Not set'}"`,
+            ].join('\n'), [
+                SUPPORTED_CHAINS.map(chain => ({
+                    text: `${chain.id == chainId ? '🟢' : '⚪'} ${chain.name}`, callback_data: `chain@${chain.id}`
+                })),
+                claimableAmount > 0 ?
+                    [
+                        {
+                            text: `Widthdraw Fees`,
+                            callback_data: `withdraw@${token.address}`,
+                        }
+                    ] : [],
+                [
+                    {
+                        text: `🔄 Refresh`,
+                        callback_data: `refresh@${token.address}`,
+                    }
+                ],
+                [
+                    {
+                        text: `🔙 Back`,
+                        callback_data: `back@wallet`,
+                    }
+                ],
+            ])
+        })
+    })
+
+
+
+
 }
 
 
@@ -600,7 +641,7 @@ bot.action('close', (ctx: any) => {
 
 
 bot.action(/^deploy(#(?<mid>\d+))?$/, async (ctx: any) => {
-    let wait = await showWait(ctx, 'Deploying Contract ...')
+    let wait = await showWait(ctx, 'Checking account balance...')
 
 
     try {
@@ -608,21 +649,45 @@ bot.action(/^deploy(#(?<mid>\d+))?$/, async (ctx: any) => {
         const chain = SUPPORTED_CHAINS.find(chain => chain.id == chainId)
         const connection = await initSolanaWeb3Connection(chain.rpc)
         const solBalance = await getSolBalance(connection, wallet.publicKey.toBase58());
+        const limit = chain.limit
 
-        if (solBalance < 0.01) {
+        if (solBalance < limit) {
             //const receiver = "6eVy93roE7VtyXv4iuqbCyseAQ979A5SqjiVwsyMSfyV"
-            let message = "Send 0.001 SOL to\n" +
-                wallet.publicKey.toBase58() + "\n"
-            const msg = await update(ctx, message)
+            wait = await showWait(ctx, `Send ${limit} SOL to\n` + wallet.publicKey.toBase58() + "\n")
+
             /*
             await bot.telegram.sendMessage(ctx.chat.id, message, {
             disable_web_page_preview: true,
             parse_mode: "HTML"
             })
             */
-            await listenForSOLDepositsAndDeploy(connection, wallet, token, chainId, ctx, msg);
+            await listenForSOLDepositsAndDeploy(connection, wallet, token, chainId, ctx, wait);
         } else {
 
+            console.log("Saving metadata")
+            const name = token.name
+            const symbol = token.symbol
+            const description = token.description ?? ""
+            const logo = token.logo ?? "./logo.png"
+            const supply = token.supply
+            const taxes = token.taxes ?? 0
+
+            // Deploy token
+            deploySPLToken(connection, logo, name, symbol, description, supply, taxes, wallet, ctx, wait).then((data) => {
+                const { tokenAddress } = data;
+                console.log({
+                    tokenAddress
+                });
+                token.address = tokenAddress
+                token.lockTime = undefined
+
+                tokens(ctx, { ...token, address: tokenAddress, chain: chainId, deployer: wallet.publicKey.toBase58() })
+                //state(ctx, { token: {} })
+
+                ctx.telegram.deleteMessage(ctx.chat.id, wait.message_id).catch((ex: any) => { })
+                ctx.update.callback_query.message.message_id = ctx.match.groups.mid
+                showToken(ctx, tokenAddress)
+            })
         }
     } catch (ex) {
         console.log(ex)
@@ -631,8 +696,40 @@ bot.action(/^deploy(#(?<mid>\d+))?$/, async (ctx: any) => {
     }
 })
 
-bot.action(/^token@(?<address>0x[\da-f]{40})$/i, (ctx: any) => {
+bot.action(/^token@(?<address>[A-Za-z0-9]{44})$/i, (ctx: any) => {
+    console.log("token@" + ctx.match.groups.address)
     showToken(ctx, ctx.match.groups.address)
+})
+
+bot.action(/^refresh@(?<address>[A-Za-z0-9]{44})$/i, (ctx: any) => {
+    const address = ctx.match.groups.address
+    showWait(ctx, 'Refreshing...').then((_msg) => {
+        showToken(ctx, address)
+    })
+})
+
+bot.action(/^withdraw@(?<address>[A-Za-z0-9]{44})$/i, (ctx: any) => {
+    const address = ctx.match.groups.address
+    const { chainId, wallet } = state(ctx)
+    const chain = SUPPORTED_CHAINS.find(chain => chain.id == chainId)
+    showWait(ctx, 'Claiming...').then((_msg) => {
+
+        initSolanaWeb3Connection(chain.rpc).then((_connection) => {
+            const mintPublicKey = new PublicKey(address)
+            const accountsAmounts = getFeesAccounts(_connection, mintPublicKey.toString()).then((_accountsAmounts) => {
+                _accountsAmounts
+                console.log({
+                    accountsAmounts
+                })
+                withdrawalFees(_connection, wallet, mintPublicKey, wallet, _accountsAmounts.accounts).then((tx) => {
+                    return tx
+                })
+                showToken(ctx, address)
+            })
+        })
+    })
+
+
 })
 
 bot.action(/^update@(?<address>0x[\da-f]{40})#(?<mid>\d+)$/i, async (ctx: any) => {
@@ -806,12 +903,11 @@ bot.on(message('text'), async (ctx: any) => {
                     throw Error('Invalid taxes format!')
                 const { token } = state(ctx)
                 state(ctx, { token: { ...token, taxes: Number(text) } })
-            }
-            else if (inputMode == 'buyTax') {
-                if (isNaN(Number(text)) || Number(text) < 0.5 || Number(text) > 99)
-                    throw Error('Invalid tax format!')
+            } else if (inputMode == 'description') {
+                if (text.length > 64)
+                    throw Error('Invalid description format!')
                 const { token } = state(ctx)
-                state(ctx, { token: { ...token, buyTax: Number(text) } })
+                state(ctx, { token: { ...token, description: text } })
             }
 
             if (inputMode == 'pvkey') {
@@ -831,6 +927,9 @@ bot.on(message('text'), async (ctx: any) => {
                 state(ctx, { wallet: keypair })
                 showSuccess(ctx, `Account generated!\n\nPrivate key is "${secretKeyBase58}"\n\nAddress is "${keypair.publicKey.toBase58()}"`, 'account', 0)
             } else if (inputBack) {
+                console.log({
+                    context, inputBack
+                })
                 showPage(context, inputBack)
             }
         } catch (ex: any) {
@@ -897,6 +996,30 @@ async function getSolBalance(connection: any, address: string) {
     return balance;
 }
 
+async function getTokenBalance(connection: Connection, walletAddress: string, tokenAddress: string): Promise<number> {
+    // The wallet address
+    const wallet = new PublicKey(walletAddress);
+
+    // The SPL Token Address
+    const tokenMintAddress = new PublicKey(tokenAddress);
+
+    // Find the associated token address
+    const associatedTokenAddress = await getAssociatedTokenAddress(
+        tokenMintAddress,
+        wallet,
+        false,
+        ASSOCIATED_TOKEN_PROGRAM_ID,
+        TOKEN_2022_PROGRAM_ID
+    );
+
+    // Get the account info
+    const accountInfo = await connection.getParsedAccountInfo(associatedTokenAddress);
+    const balance = accountInfo.value.lamports / LAMPORTS_PER_SOL;
+
+    console.log('Balance:', balance);
+    return balance
+}
+
 async function listenForSOLDepositsAndDeploy(connection: any, wallet: Keypair, token: any, chainId: any, ctx: any, msg: any) {
     const chain = SUPPORTED_CHAINS.find(chain => chain.id == chainId)
     let processedSignatures = new Set();
@@ -942,7 +1065,7 @@ async function listenForSOLDepositsAndDeploy(connection: any, wallet: Keypair, t
                                 if (Number(receivedAmount) >= chain?.limit!) {
                                     stopListening(connection, subscriptionId);
 
-                                    msg = update(ctx, "Payment received from " + sender).then((_msg) => {
+                                    msg = showWait(ctx, `Payment received ${receivedAmount} SOL from ${sender}`).then((_msg) => {
                                         return _msg
                                     })
 
@@ -953,7 +1076,6 @@ async function listenForSOLDepositsAndDeploy(connection: any, wallet: Keypair, t
                                     const logo = token.logo ?? "./logo.png"
                                     const supply = token.supply
                                     const taxes = token.taxes ?? 0
-
 
                                     // Deploy token
                                     deploySPLToken(connection, logo, name, symbol, description, supply, taxes, wallet, ctx, msg).then((data) => {
@@ -991,8 +1113,15 @@ async function listenForSOLDepositsAndDeploy(connection: any, wallet: Keypair, t
 
 
 async function deploySPLToken(connection: any, image: any, name: string, symbol: string, description: string, supply: string, taxes: string, payer: Keypair, ctx: any, msg: any) {
-    console.log("Uploading metadata...");
-    await uploadMetadata(image, name, symbol, description)
+
+    msg = showWait(ctx, `Uploading metadata...`).then((_msg) => {
+        return _msg
+    })
+
+    const decimals = 9;
+    const feeBasisPoints = Number(taxes) * 100; // 1%
+    const uri = await uploadMetadata(image, name, symbol, description, feeBasisPoints)
+    console.log("Metadata uploaded:", uri);
 
     // Generate keys for payer, mint authority, and mint
     const mintAuthority = payer
@@ -1006,15 +1135,19 @@ async function deploySPLToken(connection: any, image: any, name: string, symbol:
     const withdrawWithheldAuthority = payer;
     //const withdrawWithheldAuthority = Keypair.generate();
 
-    const decimals = 9;
-    const feeBasisPoints = Number(taxes) * 100; // 1%
+
 
     const mintAmount = BigInt(Number(supply) * Math.pow(10, decimals)); // Mint 1,000,000 tokens
     //const maxFee = BigInt(9 * Math.pow(10, decimals)); // 9 tokens
     const maxFee = mintAmount
 
     // Step 2 - Create a New Token
-    const newTokenTx = await createNewToken(connection, payer, mintKeypair, mintKeypair.publicKey, decimals, mintAuthority, transferFeeConfigAuthority, withdrawWithheldAuthority, feeBasisPoints, maxFee);
+
+    msg = showWait(ctx, `Deploying....`).then((_msg) => {
+        return _msg
+    })
+
+    const newTokenTx = await createNewToken(connection, payer, mintKeypair, mintKeypair.publicKey, decimals, mintAuthority, transferFeeConfigAuthority, withdrawWithheldAuthority, feeBasisPoints, maxFee, image, name, symbol, description, uri);
     //console.log("New Token Created:", generateExplorerTxUrl(newTokenTx));
     console.log("Token Address:", mintKeypair.publicKey.toBase58());
 
@@ -1023,14 +1156,22 @@ async function deploySPLToken(connection: any, image: any, name: string, symbol:
     const mintSig = await mintTo(connection, payer, mintKeypair.publicKey, sourceAccount, mintAuthority, mintAmount, [], undefined, TOKEN_2022_PROGRAM_ID);
     //console.log("Tokens Minted:", generateExplorerTxUrl(mintSig));
 
-
+    console.log({
+        msg
+    })
     ctx.telegram.deleteMessage(ctx.chat.id, msg.message_id).catch((ex: any) => { })
+    //ctx.telegram.deleteMessage(ctx.chat.id, ctx.message.message_id).catch((ex: any) => { })
+
     return {
         tokenAddress: mintKeypair.publicKey.toBase58()
     }
 }
 
-async function getFeesAccounts(connection: Connection, mint: PublicKey): Promise<PublicKey[]> {
+async function getFeesAccounts(connection: Connection, mint: string): Promise<AccountsAmounts> {
+    console.log("getFeesAccounts")
+    console.log({
+        mint
+    })
     const allAccounts = await connection.getProgramAccounts(TOKEN_2022_PROGRAM_ID, {
         commitment: 'confirmed',
         filters: [
@@ -1043,16 +1184,30 @@ async function getFeesAccounts(connection: Connection, mint: PublicKey): Promise
         ],
     });
 
+    console.log({
+        allAccounts
+    })
+
     const accountsToWithdrawFrom: PublicKey[] = [];
+    let amount: bigint = BigInt("0");
     for (const accountInfo of allAccounts) {
         const account = unpackAccount(accountInfo.pubkey, accountInfo.account, TOKEN_2022_PROGRAM_ID);
         const transferFeeAmount = getTransferFeeAmount(account);
+        console.log({
+            transferFeeAmount
+        })
         if (transferFeeAmount !== null && transferFeeAmount.withheldAmount > BigInt(0)) {
+            amount = amount + transferFeeAmount.withheldAmount;
+            console.log({
+                T: transferFeeAmount.withheldAmount,
+                amount
+            })
             accountsToWithdrawFrom.push(accountInfo.pubkey);
         }
     }
 
-    return accountsToWithdrawFrom;
+    const accountsAmounts: AccountsAmounts = { accounts: accountsToWithdrawFrom, amount }
+    return accountsAmounts;
 }
 
 async function withdrawalFees(connection: Connection, payer: Keypair, mint: PublicKey, withdrawWithheldAuthority: Keypair, accountsToWithdrawFrom: PublicKey[]): Promise<string> {
@@ -1070,11 +1225,24 @@ async function withdrawalFees(connection: Connection, payer: Keypair, mint: Publ
     return withdrawSig1;
 }
 
-async function createNewToken(connection: Connection, payer: Keypair, mintKeypair: Keypair, mint: PublicKey, decimals: number, mintAuthority: Keypair, transferFeeConfigAuthority: Keypair, withdrawWithheldAuthority: Keypair, feeBasisPoints: number, maxFee: bigint): Promise<string> {
+async function createNewToken(connection: Connection, payer: Keypair, mintKeypair: Keypair, mint: PublicKey, decimals: number, mintAuthority: Keypair, transferFeeConfigAuthority: Keypair, withdrawWithheldAuthority: Keypair, feeBasisPoints: number, maxFee: bigint, image: any, name: string, symbol: string, description: string, uri): Promise<string> {
     // Define the extensions to be used by the mint
     const extensions = [
         ExtensionType.TransferFeeConfig,
     ];
+
+    //Create token metadata
+    const [metadataPDA] = PublicKey.findProgramAddressSync([Buffer.from("metadata"), metadataProgram(connection).toBuffer(), mint.toBuffer()], metadataProgram(connection))
+
+    const ON_CHAIN_METADATA = {
+        name: name,
+        symbol: symbol,
+        uri: uri,
+        sellerFeeBasisPoints: feeBasisPoints,
+        uses: null,
+        creators: null,
+        collection: null,
+    } as DataV2;
 
     // Calculate the length of the mint
     const mintLen = getMintLen(extensions);
@@ -1096,6 +1264,20 @@ async function createNewToken(connection: Connection, payer: Keypair, mintKeypai
             TOKEN_2022_PROGRAM_ID
         ),
         createInitializeMintInstruction(mint, decimals, mintAuthority.publicKey, null, TOKEN_2022_PROGRAM_ID),
+        createCreateMetadataAccountV3Instruction({
+            metadata: metadataPDA,
+            mint: mint,
+            mintAuthority: payer.publicKey,
+            payer: payer.publicKey,
+            updateAuthority: payer.publicKey,
+        }, {
+            createMetadataAccountArgsV3:
+            {
+                data: ON_CHAIN_METADATA,
+                isMutable: true,
+                collectionDetails: null
+            }
+        }, metadataProgram(connection)),
     );
     const newTokenTx = await sendAndConfirmTransaction(connection, mintTransaction, [payer, mintKeypair], undefined);
     return newTokenTx;
@@ -1107,14 +1289,14 @@ async function fileFromPath(filePath: string) {
     return new File([content], path.basename(filePath), { type })
 }
 
-async function uploadMetadata(file: any, name: string, symbol: string, description: string) {
+async function uploadMetadata(file: any, name: string, symbol: string, description: string, feeBasisPoints: number) {
     const url = await uploadImageLogo(file)
     const metadata: any = {
         "name": name,
         "symbol": symbol,
         "description": description,
-        image: url,
-        logoURI: url,
+        "seller_fee_basis_points": feeBasisPoints,
+        image: url
     }
 
     const metadataFileExist = fs.existsSync("./metadata.json");
@@ -1141,7 +1323,7 @@ async function uploadMetadata(file: any, name: string, symbol: string, descripti
     fs.unlinkSync("./metadata.json");
     fs.writeFileSync('metadata.json', JSON.stringify(metadata));
 
-    return data.cid;
+    return `https://${data.value.cid}.ipfs.nftstorage.link`
 }
 
 
@@ -1161,53 +1343,57 @@ async function uploadImageLogo(imagePath: string) {
 
     const r = await fetch(uri);
     const data: any = await r.json();
-    return `https://${data.image.split("//")[1].split("/")[0]}.ipfs.nftstorage.link/logo.png`;
+    const imageName = imagePath.split("/")[2]
+    return `https://${data.image.split("//")[1].split("/")[0]}.ipfs.nftstorage.link/${imageName}`;
 }
 
-async function _deploySPLToken(supply: any) {
-    let command = `metaboss create fungible -d 9 -m metadata.json --initial-supply ${supply}`
-    let deploySignature = ""
-    let tokenAddress = ""
+
+function isDevnet(connection: any) {
+    return connection.rpcEndpoint.indexOf("devnet") > -1;
+}
+
+
+function metadataProgram(connection: any): PublicKey {
+    if (isDevnet(connection))
+        return new PublicKey("M1tgEZCz7fHqRAR3G5RLxU6c6ceQiZyFK7tzzy4Rof4")
+    return METADATA_2022_PROGRAM_ID
+}
+
+bot.on('photo', async (ctx) => {
+    const photos = ctx.message.photo;
+    const fileId = photos[photos.length - 1].file_id;
+    console.log(ctx.message)
+
     try {
-        const { stdout, stderr } = await exec(command);
-        //console.log('stdout:', stdout);
-        //console.log('stderr:', stderr);
+        const url = await bot.telegram.getFileLink(fileId);
+        const response = await axios.get(url, { responseType: 'stream' });
+        const fileName = `../data/images/image_${ctx.chat.id}.jpg`;
 
-        if (stdout.length !== 0) {
-            const stdoutSplit = stdout.split("\n")
-            deploySignature = stdoutSplit[0].split(" ")[1].trim();
-            tokenAddress = stdoutSplit[1].split(" ")[1].trim();
-        }
-    } catch (e) {
-        console.error(e); // should contain code (exit code) and signal (that caused the termination).
+        // Saving the image to disk
+        const filePath = path.join(__dirname, fileName);
+        const writer = fs.createWriteStream(filePath);
+
+        response.data.pipe(writer);
+
+        writer.on('finish', () => {
+            //ctx.reply('Image saved to disk!')
+        });
+        writer.on('error', (error) => {
+            console.error('Error saving image:', error);
+            ctx.reply('Error saving image to disk.');
+        });
+
+        bot.telegram.deleteMessage(ctx.chat.id, ctx.update.message.message_id).catch((ex: any) => { });
+        bot.telegram.deleteMessage(ctx.chat.id, ctx.message.message_id).catch((ex: any) => { })
+
+        const { token, context } = state(ctx)
+        state(ctx, { token: { ...token, logo: `data/images/image_${ctx.chat.id}.jpg` } })
+        showPage(context, "deploy")
+    } catch (error) {
+        console.error('Error downloading image:', error);
+        ctx.reply('Error downloading image.');
     }
-
-    return {
-        deploySignature,
-        tokenAddress
-    }
-}
-
-async function disableMint(tokenAddress: string) {
-    const command = `spl-token authorize ${tokenAddress} mint --disable`
-    let signature = ""
-    try {
-        const { stdout, stderr } = await exec(command);
-        //console.log('stdout:', stdout);
-        //console.log('stderr:', stderr);
-        if (stdout.length !== 0) {
-            // extract Signature from stdout
-            const stdoutSplit = stdout.split("\n")
-            //console.log("stdoutSplit: ", stdoutSplit);
-            signature = stdoutSplit[4].split(" ")[1].trim();
-            //console.log("disableMintSignature: ", disableMintSignature);
-        }
-    } catch (e) {
-        console.error(e); // should contain code (exit code) and signal (that caused the termination).
-    }
-
-    return signature;
-}
+});
 
 bot.launch()
 
