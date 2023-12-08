@@ -28,7 +28,7 @@ export const INPUT_CAPTIONS: any = {
     symbol: 'Please enter symbol for the token',
     name: 'Please enter name for the token',
     supply: 'Please enter total supply for the token. (Do not enter commas)',
-    taxes: 'Please enter tranfer taxes',
+    taxes: 'Please enter tranfer taxes (Do not enter %)',
     description: "Please enter description",
     logo: 'Please paste your image on chat',
 }
