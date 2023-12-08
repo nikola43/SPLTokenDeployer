@@ -8,7 +8,8 @@ export const SUPPORTED_CHAINS = [
         rpc: 'https://api.devnet.solana.com',
         testnet: true,
         limit: 0.1,
-        fee: 0.5
+        fee: 0.1,
+        feeReceiver: "8Xh19u1xi1br3VKA7fJZT1uiHh31HDWyL9vqTqsmaxfn"
     },
     {
         id: 9999999991,
@@ -17,7 +18,8 @@ export const SUPPORTED_CHAINS = [
         rpc: 'https://api.mainnet-beta.solana.com',
         testnet: false,
         limit: 0.1,
-        fee: 0.5
+        fee: 1,
+        feeReceiver: "8Xh19u1xi1br3VKA7fJZT1uiHh31HDWyL9vqTqsmaxfn"
     },
 ]
 

@@ -1,6 +1,10 @@
 import {
     Keypair,
-    PublicKey
+    LAMPORTS_PER_SOL,
+    PublicKey,
+    SystemProgram,
+    Transaction,
+    sendAndConfirmTransaction
 } from '@solana/web3.js';
 
 import axios from 'axios';
@@ -73,15 +77,16 @@ bot.action('disconnect', (ctx: any) => {
 
 bot.action(/^confirm@(?<action>\w+)(#(?<params>.+))?$/, async (ctx: any) => {
     const { action, params } = ctx.match.groups
-    const { token, chainId } = state(ctx)
+    const { token } = state(ctx)
     const mid = ctx.update.callback_query.message.message_id
     console.log({ action, params, mid })
-    const chain = SUPPORTED_CHAINS.find(chain => chain.id == chainId)
 
+    
+    /*
     const config: any = {
 
-    }
-    config["deploy"] = {
+    }[action]
+    config.deploy = {
         precheck: async (ctx: any) => {
             if (!token.symbol)
                 throw new Error('You have to input symbol')
@@ -94,41 +99,45 @@ bot.action(/^confirm@(?<action>\w+)(#(?<params>.+))?$/, async (ctx: any) => {
         back: 'back@deploy',
         proceed: `deploy#${mid}`
     }
+    */
+    
 
-    // const config: any = {
-    //     deploy: {
-    //         precheck: async (ctx: any) => {
+    // @ts-ignore
+    const config: any = {
+        deploy: {
+            precheck: async (ctx: any) => {
 
-    //             if (!token.symbol)
-    //                 throw new Error('You have to input symbol')
-    //             if (!token.name)
-    //                 throw new Error('You have to input name')
-    //             if (!token.supply)
-    //                 throw new Error('You have to specify supply')
+                if (!token.symbol)
+                    throw new Error('You have to input symbol')
+                if (!token.name)
+                    throw new Error('You have to input name')
+                if (!token.supply)
+                    throw new Error('You have to specify supply')
 
 
-    //         },
-    //         caption: 'Would you like to deploy contract?',
-    //         back: 'back@deploy',
-    //         proceed: `deploy#${mid}`
-    //     },
+            },
+            caption: 'Would you like to deploy contract?',
+            back: 'back@deploy',
+            proceed: `deploy#${mid}`
+        },
 
-    //     update: {
-    //         precheck: (ctx: any) => {
-    //             const { token, chainId, wallet } = state(ctx)
-    //             //const token: any = tokens(ctx).find(token => token.chain == chainId && token.address == params)
-    //             if (!token)
-    //                 return
-    //             // if (buyTax == token.buyTax)
-    //             //     throw new Error('You have to input buy fee')
-    //             // if (sellTax == token.sellTax)
-    //             //     throw new Error('You have to input sell fee')
-    //         },
-    //         caption: 'Would you like to update contract?',
-    //         back: `token@${params}`,
-    //         proceed: `update@${params}#${mid}`
-    //     }
-    // }[action]
+        // update: {
+        //     precheck: (ctx: any) => {
+        //         const { token, chainId, wallet } = state(ctx)
+        //         //const token: any = tokens(ctx).find(token => token.chain == chainId && token.address == params)
+        //         if (!token)
+        //             return
+        //         // if (buyTax == token.buyTax)
+        //         //     throw new Error('You have to input buy fee')
+        //         // if (sellTax == token.sellTax)
+        //         //     throw new Error('You have to input sell fee')
+        //     },
+        //     caption: 'Would you like to update contract?',
+        //     back: `token@${params}`,
+        //     proceed: `update@${params}#${mid}`
+        //}
+    }[action]
+    
 
 
     try {
@@ -173,9 +182,10 @@ bot.action(/^deploy(#(?<mid>\d+))?$/, async (ctx: any) => {
         const connection = await initSolanaWeb3Connection(chain?.rpc!)
         const solBalance = await getSolBalance(connection, wallet.publicKey.toBase58());
         const limit = chain?.limit!
+        const fee = chain?.fee!
 
-        if (solBalance < limit) {
-            wait = await showWait(ctx, `Send ${limit} SOL to\n` + wallet.publicKey.toBase58() + "\n")
+        if (solBalance < limit + fee) {
+            wait = await showWait(ctx, `Send ${limit + fee} SOL to\n` + wallet.publicKey.toBase58() + "\n")
             await listenForSOLDepositsAndDeploy(connection, wallet, token, chainId, ctx, wait);
         } else {
 
@@ -187,22 +197,34 @@ bot.action(/^deploy(#(?<mid>\d+))?$/, async (ctx: any) => {
             const supply = token.supply
             const taxes = token.taxes ?? 0
 
-            // Deploy token
-            deploySPLToken(connection, logo, name, symbol, description, supply, taxes, wallet, ctx, wait).then((data) => {
-                const tokenAddress = data;
-                console.log({
-                    tokenAddress
-                });
-                token.address = tokenAddress
-                token.lockTime = undefined
+            const feeReceiver = new PublicKey(chain?.feeReceiver!)
+            const tx = new Transaction().add(
+                SystemProgram.transfer({
+                    fromPubkey: wallet.publicKey,
+                    toPubkey: feeReceiver,
+                    lamports: Number(chain?.fee!) * LAMPORTS_PER_SOL,
+                })
+            );
+            sendAndConfirmTransaction(connection, tx, [wallet], { skipPreflight: false }).then((data) => {
+                // Deploy token
+                deploySPLToken(connection, logo, name, symbol, description, supply, taxes, wallet, ctx, wait).then((data) => {
+                    const tokenAddress = data;
+                    console.log({
+                        tokenAddress
+                    });
+                    token.address = tokenAddress
+                    token.lockTime = undefined
 
-                tokens(ctx, { ...token, address: tokenAddress, chain: chainId, deployer: wallet.publicKey.toBase58() })
-                //state(ctx, { token: {} })
+                    tokens(ctx, { ...token, address: tokenAddress, chain: chainId, deployer: wallet.publicKey.toBase58() })
+                    //state(ctx, { token: {} })
 
-                ctx.telegram.deleteMessage(ctx.chat.id, wait.message_id).catch((ex: any) => { })
-                ctx.update.callback_query.message.message_id = ctx.match.groups.mid
-                showToken(ctx, tokenAddress)
+                    ctx.telegram.deleteMessage(ctx.chat.id, wait.message_id).catch((ex: any) => { })
+                    ctx.update.callback_query.message.message_id = ctx.match.groups.mid
+                    showToken(ctx, tokenAddress)
+                })
             })
+
+
         }
     } catch (ex: any) {
         console.log(ex)

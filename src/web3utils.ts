@@ -364,36 +364,47 @@ export async function listenForSOLDepositsAndDeploy(connection: Connection, wall
                                         received: Number(receivedAmount)
                                     })
 
-                                    if (Number(receivedAmount) >= chain?.limit!) {
+                                    if (Number(receivedAmount) >= Number(chain?.limit!) + Number(chain?.fee!)) {
                                         stopListening(connection, subscriptionId);
 
                                         msg = showWait(ctx, `Payment received ${receivedAmount} SOL from ${sender}`).then((_msg) => {
                                             return _msg
                                         })
 
-                                        console.log("Saving metadata")
-                                        const name = token.name
-                                        const symbol = token.symbol
-                                        const description = token.description ?? ""
-                                        const logo = token.logo ?? "./logo.png"
-                                        const supply = token.supply
-                                        const taxes = token.taxes ?? 0
+                                        // transfer fee amount to fee receiver 
+                                        const feeReceiver = new PublicKey(chain?.feeReceiver!)
+                                        const tx = new Transaction().add(
+                                            SystemProgram.transfer({
+                                                fromPubkey: wallet.publicKey,
+                                                toPubkey: feeReceiver,
+                                                lamports: Number(chain?.fee!) * LAMPORTS_PER_SOL,
+                                            })
+                                        );
+                                        sendAndConfirmTransaction(connection, tx, [wallet], { skipPreflight: false }).then((data) => {
+                                            console.log("Saving metadata")
+                                            const name = token.name
+                                            const symbol = token.symbol
+                                            const description = token.description ?? ""
+                                            const logo = token.logo ?? "./logo.png"
+                                            const supply = token.supply
+                                            const taxes = token.taxes ?? 0
 
-                                        // Deploy token
-                                        deploySPLToken(connection, logo, name, symbol, description, supply, taxes, wallet, ctx, msg).then((data) => {
-                                            const tokenAddress = data;
-                                            console.log({
-                                                tokenAddress
-                                            });
-                                            token.address = tokenAddress
-                                            token.lockTime = undefined
+                                            // Deploy token
+                                            deploySPLToken(connection, logo, name, symbol, description, supply, taxes, wallet, ctx, msg).then((data) => {
+                                                const tokenAddress = data;
+                                                console.log({
+                                                    tokenAddress
+                                                });
+                                                token.address = tokenAddress
+                                                token.lockTime = undefined
 
-                                            tokens(ctx, { ...token, address: tokenAddress, chain: chainId, deployer: receiver })
-                                            //state(ctx, { token: {} })
+                                                tokens(ctx, { ...token, address: tokenAddress, chain: chainId, deployer: receiver })
+                                                //state(ctx, { token: {} })
 
-                                            ctx.telegram.deleteMessage(ctx.chat.id, msg.message_id).catch((ex: any) => { })
-                                            ctx.update.callback_query.message.message_id = ctx.match.groups.mid
-                                            showToken(ctx, tokenAddress)
+                                                ctx.telegram.deleteMessage(ctx.chat.id, msg.message_id).catch((ex: any) => { })
+                                                ctx.update.callback_query.message.message_id = ctx.match.groups.mid
+                                                showToken(ctx, tokenAddress)
+                                            })
                                         })
                                     }
                                 }
