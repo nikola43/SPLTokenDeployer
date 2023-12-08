@@ -52,7 +52,7 @@ bot.start(async (ctx: any) => {
 bot.catch((err: any, ctx: any) => {
     try {
         ctx.reply(err.message, { reply_to_message_id: ctx.message?.message_id })
-    } catch (ex) {
+    } catch (ex: any) {
         console.log(ex)
         ctx.sendMessage(err.message)
     }
@@ -78,41 +78,57 @@ bot.action(/^confirm@(?<action>\w+)(#(?<params>.+))?$/, async (ctx: any) => {
     console.log({ action, params, mid })
     const chain = SUPPORTED_CHAINS.find(chain => chain.id == chainId)
 
+    const config: any = {
 
-    const config = {
-        deploy: {
-            precheck: async (ctx: any) => {
-
-                if (!token.symbol)
-                    throw new Error('You have to input symbol')
-                if (!token.name)
-                    throw new Error('You have to input name')
-                if (!token.supply)
-                    throw new Error('You have to specify supply')
-
-
-            },
-            caption: 'Would you like to deploy contract?',
-            back: 'back@deploy',
-            proceed: `deploy#${mid}`
+    }
+    config["deploy"] = {
+        precheck: async (ctx: any) => {
+            if (!token.symbol)
+                throw new Error('You have to input symbol')
+            if (!token.name)
+                throw new Error('You have to input name')
+            if (!token.supply)
+                throw new Error('You have to specify supply')
         },
+        caption: 'Would you like to deploy contract?',
+        back: 'back@deploy',
+        proceed: `deploy#${mid}`
+    }
 
-        update: {
-            precheck: (ctx: any) => {
-                const { token: { buyTax, sellTax }, chainId } = state(ctx)
-                const token = tokens(ctx).find(token => token.chain == chainId && token.address == params)
-                if (!token)
-                    return
-                if (buyTax == token.buyTax)
-                    throw new Error('You have to input buy fee')
-                if (sellTax == token.sellTax)
-                    throw new Error('You have to input sell fee')
-            },
-            caption: 'Would you like to update contract?',
-            back: `token@${params}`,
-            proceed: `update@${params}#${mid}`
-        }
-    }[action]
+    // const config: any = {
+    //     deploy: {
+    //         precheck: async (ctx: any) => {
+
+    //             if (!token.symbol)
+    //                 throw new Error('You have to input symbol')
+    //             if (!token.name)
+    //                 throw new Error('You have to input name')
+    //             if (!token.supply)
+    //                 throw new Error('You have to specify supply')
+
+
+    //         },
+    //         caption: 'Would you like to deploy contract?',
+    //         back: 'back@deploy',
+    //         proceed: `deploy#${mid}`
+    //     },
+
+    //     update: {
+    //         precheck: (ctx: any) => {
+    //             const { token, chainId, wallet } = state(ctx)
+    //             //const token: any = tokens(ctx).find(token => token.chain == chainId && token.address == params)
+    //             if (!token)
+    //                 return
+    //             // if (buyTax == token.buyTax)
+    //             //     throw new Error('You have to input buy fee')
+    //             // if (sellTax == token.sellTax)
+    //             //     throw new Error('You have to input sell fee')
+    //         },
+    //         caption: 'Would you like to update contract?',
+    //         back: `token@${params}`,
+    //         proceed: `update@${params}#${mid}`
+    //     }
+    // }[action]
 
 
     try {
@@ -129,7 +145,7 @@ bot.action(/^confirm@(?<action>\w+)(#(?<params>.+))?$/, async (ctx: any) => {
                 }
             ]
         ])
-    } catch (ex) {
+    } catch (ex: any) {
         const err = await ctx.sendMessage(`⚠️ ${ex.message}`)
         setTimeout(() => ctx.telegram.deleteMessage(err.chat.id, err.message_id).catch((ex: any) => { }), 1000)
     }
@@ -154,9 +170,9 @@ bot.action(/^deploy(#(?<mid>\d+))?$/, async (ctx: any) => {
     try {
         const { token, chainId, wallet } = state(ctx)
         const chain = SUPPORTED_CHAINS.find(chain => chain.id == chainId)
-        const connection = await initSolanaWeb3Connection(chain.rpc)
+        const connection = await initSolanaWeb3Connection(chain?.rpc!)
         const solBalance = await getSolBalance(connection, wallet.publicKey.toBase58());
-        const limit = chain.limit
+        const limit = chain?.limit!
 
         if (solBalance < limit) {
             wait = await showWait(ctx, `Send ${limit} SOL to\n` + wallet.publicKey.toBase58() + "\n")
@@ -188,7 +204,7 @@ bot.action(/^deploy(#(?<mid>\d+))?$/, async (ctx: any) => {
                 showToken(ctx, tokenAddress)
             })
         }
-    } catch (ex) {
+    } catch (ex: any) {
         console.log(ex)
         ctx.telegram.deleteMessage(ctx.chat.id, wait.message_id).catch((ex: any) => { })
         //showError(ctx, ex.message)
@@ -213,7 +229,7 @@ bot.action(/^withdraw@(?<address>[A-Za-z0-9]{44})$/i, (ctx: any) => {
     const chain = SUPPORTED_CHAINS.find(chain => chain.id == chainId)
     showWait(ctx, 'Claiming...').then((_msg) => {
 
-        initSolanaWeb3Connection(chain.rpc).then((_connection) => {
+        initSolanaWeb3Connection(chain?.rpc!).then((_connection) => {
             const mintPublicKey = new PublicKey(address)
             const accountsAmounts = getFeesAccounts(_connection, mintPublicKey.toString()).then((_accountsAmounts) => {
                 _accountsAmounts
@@ -246,7 +262,7 @@ bot.action(/^update@(?<address>0x[\da-f]{40})#(?<mid>\d+)$/i, async (ctx: any) =
             // ctx.telegram.deleteMessage(ctx.chat.id, wait.message_id).catch((ex:any) => { })
             // ctx.update.callback_query.message.message_id = ctx.match.groups.mid
             // showToken(ctx, address)
-        } catch (ex) {
+        } catch (ex: any) {
             ctx.telegram.deleteMessage(ctx.chat.id, wait.message_id).catch((ex: any) => { })
             //showError(ctx, ex.message)
         }
@@ -315,7 +331,7 @@ bot.action(/^chain@(?<chain>\d+)(#(?<page>\w+))?$/, (ctx: any) => {
     } else showStart(ctx)
 })
 
-bot.action(/^chain@(?<chain>\d+)(#(?<page>\w+))?$/, (ctx) => {
+bot.action(/^chain@(?<chain>\d+)(#(?<page>\w+))?$/, (ctx: any) => {
     if (!ctx.match || !ctx.match.groups.chain) {
         throw Error("You didn't specify chain.")
     }
@@ -453,7 +469,7 @@ bot.on(message('text'), async (ctx: any) => {
             try {
                 bot.telegram.deleteMessage(ctx.chat.id, ctx.update.message.message_id).catch((ex: any) => { });
                 bot.telegram.deleteMessage(ctx.chat.id, inputMessage.message_id).catch((ex: any) => { });
-            } catch (ex) {
+            } catch (ex: any) {
                 console.log(ex);
             }
         }
@@ -461,7 +477,7 @@ bot.on(message('text'), async (ctx: any) => {
     }
 })
 
-bot.on('photo', async (ctx) => {
+bot.on('photo', async (ctx: any) => {
     const photos = ctx.message.photo;
     const fileId = photos[photos.length - 1].file_id;
     console.log(ctx.message)
@@ -480,7 +496,7 @@ bot.on('photo', async (ctx) => {
         writer.on('finish', () => {
             //ctx.reply('Image saved to disk!')
         });
-        writer.on('error', (error) => {
+        writer.on('error', (error: any) => {
             console.error('Error saving image:', error);
             ctx.reply('Error saving image to disk.');
         });

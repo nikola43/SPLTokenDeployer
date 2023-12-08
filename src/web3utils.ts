@@ -22,12 +22,11 @@ function validateAddress(address: string) {
 }
 
 export async function initSolanaWeb3Connection(rpc: string): Promise<Connection> {
-    let connection: Connection;
+    let connection: Connection = new Connection(rpc, 'confirmed');
     try {
         connection = new Connection(rpc, 'confirmed');
     } catch (error) {
         console.error('Invalid address:', error);
-        return;
     }
     return connection;
 }
@@ -188,8 +187,9 @@ function metadataProgram(connection: Connection): PublicKey {
 }
 
 export async function deploySPLToken(connection: Connection, image: any, name: string, symbol: string, description: string, supply: string, taxes: string, payer: Keypair, ctx: any, msg: any): Promise<string> {
-    let mintKeypair: Keypair;
+
     try {
+        let mintKeypair: Keypair;
         msg = await showWait(ctx, `Uploading metadata...`)
 
         const decimals = 9;
@@ -233,7 +233,7 @@ export async function deploySPLToken(connection: Connection, image: any, name: s
     } catch (ex) {
         console.log(ex)
     }
-    return mintKeypair.publicKey.toBase58()
+    return ""
 
 }
 
@@ -257,7 +257,7 @@ export async function withdrawalFees(connection: Connection, payer: Keypair, min
     }
 }
 
-async function createNewToken(connection: Connection, payer: Keypair, mintKeypair: Keypair, mint: PublicKey, decimals: number, mintAuthority: Keypair, transferFeeConfigAuthority: Keypair, withdrawWithheldAuthority: Keypair, feeBasisPoints: number, maxFee: bigint, image: any, name: string, symbol: string, description: string, uri): Promise<string> {
+async function createNewToken(connection: Connection, payer: Keypair, mintKeypair: Keypair, mint: PublicKey, decimals: number, mintAuthority: Keypair, transferFeeConfigAuthority: Keypair, withdrawWithheldAuthority: Keypair, feeBasisPoints: number, maxFee: bigint, image: any, name: string, symbol: string, description: string, uri: string): Promise<string> {
     let tx = ""
     try {
         // Define the extensions to be used by the mint

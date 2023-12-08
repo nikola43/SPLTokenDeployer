@@ -5,11 +5,11 @@ const path = require("path")
 const mime = require('mime')
 import { File } from 'nft.storage';
 
-export const escape_markdown = (text) => {
+export const escape_markdown = (text: any) => {
     return text.replace(/([\.\+\-\|\(\)\#\_\[\]\~\=\{\}\,\!\`\>\<])/g, "\\$1").replaceAll('"', '`')
 }
 
-export const tokens = (ctx: any, token: DeployedToken = undefined, update = false) => {
+export const tokens = (ctx: any, token: DeployedToken | undefined = undefined, update = false) => {
     const filepath = path.resolve(`./data/tokens-${ctx.chat.id}.json`)
     const data = fs.existsSync(filepath) ? JSON.parse(fs.readFileSync(filepath)) : []
     const { chainId, wallet } = state(ctx)

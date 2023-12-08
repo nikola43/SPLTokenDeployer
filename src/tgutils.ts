@@ -71,7 +71,7 @@ export const showWallet = async (ctx: any): Promise<any> => {
         return showStart(ctx)
 
     const chain = SUPPORTED_CHAINS.find(chain => chain.id == chainId)
-    const connection = await initSolanaWeb3Connection(chain.rpc)
+    const connection = await initSolanaWeb3Connection(chain?.rpc!)
     const solBalance = await getSolBalance(connection, wallet.publicKey.toBase58());
 
     return update(ctx, ['🧳 Wallet: ' + wallet.publicKey.toBase58() + " " + solBalance / LAMPORTS_PER_SOL + " SOL"].join('\n'), [
@@ -152,12 +152,12 @@ export const showDeploy = async (ctx: any) => {
     return update(ctx, [
         '🧳 Token Parameters',
         '',
-        `${token.symbol ? '✅' : '❌'} Symbol: "${token.symbol?.toUpperCase() ?? 'Not set'}"`,
-        `${token.name ? '✅' : '❌'} Name: "${token.name ?? 'Not set'}"`,
-        `${token.supply ? '✅' : '❌'} Supply: "${token.supply ?? 'Not set'}"`,
-        `${token.taxes ? '✅' : '❔'} Taxes: "${token.taxes ? `${token.taxes}%` : 'Not set'}"`,
-        `${token.description ? '✅' : '❔'} Description: "${token.description ? `${token.description}` : 'Not set'}"`,
-        `${token.logo ? '✅' : '❔'} Logo: "${token.logo ? `${token.logo}` : 'Not set'}"`,
+        `${token?.symbol ? '✅' : '❌'} Symbol: "${token?.symbol?.toUpperCase() ?? 'Not set'}"`,
+        `${token?.name ? '✅' : '❌'} Name: "${token?.name ?? 'Not set'}"`,
+        `${token?.supply ? '✅' : '❌'} Supply: "${token?.supply ?? 'Not set'}"`,
+        `${token?.taxes ? '✅' : '❔'} Taxes: "${token?.taxes ? `${token?.taxes}%` : 'Not set'}"`,
+        `${token?.description ? '✅' : '❔'} Description: "${token?.description ? `${token?.description}` : 'Not set'}"`,
+        `${token?.logo ? '✅' : '❔'} Logo: "${token?.logo ? `${token?.logo}` : 'Not set'}"`,
     ].join('\n'), [
         SUPPORTED_CHAINS.map(chain => ({
             text: `${chain.id == chainId ? '🟢' : '⚪'} ${chain.name}`, callback_data: `chain@${chain.id}`
@@ -224,8 +224,8 @@ export const showList = async (ctx: any) => {
         ...deployed.map(token =>
             [
                 {
-                    text: `${token.name} (${token.symbol}) address ${token.address}`,
-                    callback_data: `token@${token.address}`
+                    text: `${token?.name} (${token?.symbol}) address ${token?.address}`,
+                    callback_data: `token@${token?.address}`
                 }
             ]),
         [
@@ -254,7 +254,7 @@ export const showToken = async (ctx: any, address: string) => {
     const { chainId, wallet } = state(ctx)
 
     const chain = SUPPORTED_CHAINS.find(chain => chain.id == chainId)
-    const connection = await initSolanaWeb3Connection(chain.rpc)
+    const connection = await initSolanaWeb3Connection(chain?.rpc!)
     const accountsAmounts = await getFeesAccounts(connection, address)
     const deployed: DeployedToken[] = tokens(ctx)
     console.log({ deployed })
@@ -268,16 +268,16 @@ export const showToken = async (ctx: any, address: string) => {
     return update(ctx, [
         '🧳 Token Parameters',
         '',
-        `✅ Address: "${token.address}"`,
+        `✅ Address: "${token?.address}"`,
         '',
         `✅ Available withdraw: "${claimableAmount}"`,
         '',
-        `${token.symbol ? '✅' : '❌'} Symbol: "${token.symbol?.toUpperCase() ?? 'Not set'}"`,
-        `${token.name ? '✅' : '❌'} Name: "${token.name ?? 'Not set'}"`,
-        `${token.supply ? '✅' : '❌'} Supply: "${token.supply ?? 'Not set'}"`,
-        `${token.taxes ? '✅' : '❔'} Taxes: "${token.taxes ? `${token.taxes}%` : 'Not set'}"`,
-        `${token.description ? '✅' : '❔'} Description: "${token.description ? `${token.description}` : 'Not set'}"`,
-        `${token.logo ? '✅' : '❔'} Logo: "${token.logo ? `${token.logo}` : 'Not set'}"`,
+        `${token?.symbol ? '✅' : '❌'} Symbol: "${token?.symbol?.toUpperCase() ?? 'Not set'}"`,
+        `${token?.name ? '✅' : '❌'} Name: "${token?.name ?? 'Not set'}"`,
+        `${token?.supply ? '✅' : '❌'} Supply: "${token?.supply ?? 'Not set'}"`,
+        `${token?.taxes ? '✅' : '❔'} Taxes: "${token?.taxes ? `${token?.taxes}%` : 'Not set'}"`,
+        `${token?.description ? '✅' : '❔'} Description: "${token?.description ? `${token?.description}` : 'Not set'}"`,
+        `${token?.logo ? '✅' : '❔'} Logo: "${token?.logo ? `${token?.logo}` : 'Not set'}"`,
     ].join('\n'), [
         SUPPORTED_CHAINS.map(chain => ({
             text: `${chain.id == chainId ? '🟢' : '⚪'} ${chain.name}`, callback_data: `chain@${chain.id}`
@@ -286,13 +286,13 @@ export const showToken = async (ctx: any, address: string) => {
             [
                 {
                     text: `Widthdraw Fees`,
-                    callback_data: `withdraw@${token.address}`,
+                    callback_data: `withdraw@${token?.address}`,
                 }
             ] : [],
         [
             {
                 text: `🔄 Refresh`,
-                callback_data: `refresh@${token.address}`,
+                callback_data: `refresh@${token?.address}`,
             }
         ],
         [
